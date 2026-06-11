@@ -4,7 +4,8 @@
       "Bash(node *)",
       "Bash(open *)",
       "Bash(gh auth *)",
-      "Bash(gh repo *)"
+      "Bash(gh repo *)",
+      "Bash(perl -i -pe 's/await supabaseClient\\\\s+\\\\.from\\\\\\(/await supabaseClient.from\\(/g' app.js)"
     ]
   }
 }

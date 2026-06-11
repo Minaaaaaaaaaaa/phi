@@ -13,7 +13,7 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // ---------- Supabase ----------
 const SUPABASE_URL = 'https://tljigsgrofmgzctrxojc.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InRsamlnc2dyb2ZtZ3pjdHJ4b2pjIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODExNzIwODQsImV4cCI6MjA5Njc0ODA4NH0.Mcn_N8zotTmtXT0AXPUD-l8N68Ox8soteqDv4pvltm4';
-const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 let currentUserId = null;   // auth.uid() for all data operations
 let appStarted = false;     // guards one-time data load after first auth
@@ -71,8 +71,7 @@ function saveUIPrefs() {
 async function loadFromSupabase() {
   if (!currentUserId) return;
 
-  const { data: projectRows, error: pErr } = await supabase
-    .from('projects')
+  const { data: projectRows, error: pErr } = await supabaseClient.from('projects')
     .select('*')
     .eq('user_id', currentUserId)
     .order('order_index');
@@ -94,8 +93,7 @@ async function loadFromSupabase() {
 
   let taskRows = [];
   if (projects.length) {
-    const { data, error: tErr } = await supabase
-      .from('tasks')
+    const { data, error: tErr } = await supabaseClient.from('tasks')
       .select('*')
       .in('project_id', projects.map(p => p.id))
       .order('order_index');
@@ -130,8 +128,7 @@ async function loadFromSupabase() {
 
   // Today tasks (for today's date only)
   const today = todayISO();
-  const { data: todayRows, error: ttErr } = await supabase
-    .from('today_tasks')
+  const { data: todayRows, error: ttErr } = await supabaseClient.from('today_tasks')
     .select('*')
     .eq('user_id', currentUserId)
     .eq('date', today);
@@ -142,8 +139,7 @@ async function loadFromSupabase() {
   state.todayDate = today;
 
   // Pomodoro sessions
-  const { data: sessionRows, error: sErr } = await supabase
-    .from('pomodoro_sessions')
+  const { data: sessionRows, error: sErr } = await supabaseClient.from('pomodoro_sessions')
     .select('*')
     .eq('user_id', currentUserId);
   if (sErr) throw sErr;
@@ -236,23 +232,23 @@ async function syncToSupabase() {
     const delTasks = [...dbSnapshot.taskIds].filter(id => !curTaskIds.has(id));
 
     // Clear today's today_tasks first so deleting tasks can't trip a FK.
-    let res = await supabase.from('today_tasks').delete().eq('user_id', currentUserId).eq('date', today);
+    let res = await supabaseClient.from('today_tasks').delete().eq('user_id', currentUserId).eq('date', today);
     if (res.error) throw res.error;
 
     if (projectRows.length) {
-      res = await supabase.from('projects').upsert(projectRows);
+      res = await supabaseClient.from('projects').upsert(projectRows);
       if (res.error) throw res.error;
     }
     if (taskRows.length) {
-      res = await supabase.from('tasks').upsert(taskRows);
+      res = await supabaseClient.from('tasks').upsert(taskRows);
       if (res.error) throw res.error;
     }
     if (delTasks.length) {
-      res = await supabase.from('tasks').delete().in('id', delTasks);
+      res = await supabaseClient.from('tasks').delete().in('id', delTasks);
       if (res.error) throw res.error;
     }
     if (delProjects.length) {
-      res = await supabase.from('projects').delete().in('id', delProjects);
+      res = await supabaseClient.from('projects').delete().in('id', delProjects);
       if (res.error) throw res.error;
     }
     if (state.todayTasks.length) {
@@ -261,7 +257,7 @@ async function syncToSupabase() {
         date: today,
         task_id: taskId
       }));
-      res = await supabase.from('today_tasks').insert(rows);
+      res = await supabaseClient.from('today_tasks').insert(rows);
       if (res.error) throw res.error;
     }
 
@@ -277,7 +273,7 @@ async function syncToSupabase() {
 async function insertSession(s) {
   if (!currentUserId) return;
   try {
-    const { error } = await supabase.from('pomodoro_sessions').insert({
+    const { error } = await supabaseClient.from('pomodoro_sessions').insert({
       id: s.id,
       user_id: currentUserId,
       project_id: s.projectId,
@@ -2060,7 +2056,7 @@ async function handleSession(session) {
 
 async function setupAuth() {
   document.getElementById('google-login-btn').addEventListener('click', async () => {
-    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google' });
+    const { error } = await supabaseClient.auth.signInWithOAuth({ provider: 'google' });
     if (error) {
       console.warn('OAuth error', error);
       showToast('로그인 중 오류가 발생했어요. 다시 시도해주세요.');
@@ -2070,16 +2066,16 @@ async function setupAuth() {
   const logoutLink = document.getElementById('logout-link');
   if (logoutLink) {
     logoutLink.addEventListener('click', async () => {
-      await supabase.auth.signOut();
+      await supabaseClient.auth.signOut();
       showLoginScreen();
     });
   }
 
   // React to login/logout (also fires once with the current session).
-  supabase.auth.onAuthStateChange((_event, session) => { handleSession(session); });
+  supabaseClient.auth.onAuthStateChange((_event, session) => { handleSession(session); });
 
   // Resolve the current session on load.
-  const { data: { session } } = await supabase.auth.getSession();
+  const { data: { session } } = await supabaseClient.auth.getSession();
   await handleSession(session);
 }
 
