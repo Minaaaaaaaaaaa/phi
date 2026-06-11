@@ -263,6 +263,8 @@ async function syncToSupabase() {
     if (res.error) throw res.error;
 
     if (projectRows.length) {
+      console.log('INSERTING:', JSON.stringify(projectRows, null, 2));
+      console.log('CURRENT USER ID:', currentUserId);
       res = await supabaseClient.from('projects').upsert(projectRows).select();
       console.log('[sync] projects upsert result:', res.data, res.error);
       if (res.error) throw res.error;
@@ -300,9 +302,11 @@ async function syncToSupabase() {
     // Surface the full Supabase error (message / details / hint / code) — an RLS
     // policy rejection shows up here, e.g. code "42501" / "violates row-level
     // security policy". This is the most common reason a write silently fails.
+    console.error('SUPABASE ERROR:', JSON.stringify(e, Object.getOwnPropertyNames(e || {}), 2));
     console.error('[sync] ❌ FAILED:', e, '| message:', e && e.message,
       '| details:', e && e.details, '| hint:', e && e.hint, '| code:', e && e.code);
-    showToast('저장 중 오류가 발생했어요. 다시 시도해주세요.');
+    // TEMP: show the real error text on screen instead of the generic message.
+    showToast((e && (e.message || e.details || e.code)) || 'unknown error');
   }
 }
 
