@@ -69,12 +69,17 @@ function saveUIPrefs() {
 // Fetch all of the signed-in user's data and rebuild the in-memory `state`
 // model (nested projects → tasks, a flat todayTasks id list, and phiSessions).
 async function loadFromSupabase() {
-  if (!currentUserId) return;
+  if (!currentUserId) {
+    console.warn('[load] skipped — no currentUserId.');
+    return;
+  }
+  console.log('[load] fetching data for user', currentUserId);
 
   const { data: projectRows, error: pErr } = await supabaseClient.from('projects')
     .select('*')
     .eq('user_id', currentUserId)
     .order('order_index');
+  console.log('[load] projects select result:', projectRows, pErr);
   if (pErr) throw pErr;
 
   const projects = (projectRows || []).map(p => ({
@@ -160,6 +165,9 @@ async function loadFromSupabase() {
   dbSnapshot.projectIds = new Set(projects.map(p => p.id));
   dbSnapshot.taskIds = new Set();
   projects.forEach(p => p.tasks.forEach(t => dbSnapshot.taskIds.add(t.id)));
+  console.log('[load] ✅ loaded', projects.length, 'projects,',
+    dbSnapshot.taskIds.size, 'tasks,', phiSessions.length, 'sessions,',
+    state.todayTasks.length, 'today-tasks.');
 }
 
 // ---------- Supabase: sync ----------
@@ -169,7 +177,11 @@ let syncTimer = null;
 let syncing = false;
 let syncDirty = false;
 function save() {
-  if (!currentUserId) return;
+  if (!currentUserId) {
+    console.warn('[save] skipped — no currentUserId yet (not authenticated). Nothing will persist.');
+    return;
+  }
+  console.log('[save] scheduling sync for user', currentUserId, '| projects:', state.projects.length);
   syncDirty = true;
   if (syncTimer) clearTimeout(syncTimer);
   syncTimer = setTimeout(runSync, 400);
@@ -189,10 +201,21 @@ async function runSync() {
 }
 
 async function syncToSupabase() {
-  if (!currentUserId) return;
+  if (!currentUserId) {
+    console.warn('[sync] aborted — no currentUserId.');
+    return;
+  }
   const today = todayISO();
 
   try {
+    // Confirm the row user_id we are about to write matches the real auth.uid().
+    // A mismatch here is the usual cause of RLS rejecting the write.
+    const { data: authData, error: authErr } = await supabaseClient.auth.getUser();
+    console.log('[sync] auth.getUser():', authData && authData.user ? authData.user.id : null, authErr);
+    if (authData && authData.user && authData.user.id !== currentUserId) {
+      console.warn('[sync] MISMATCH: currentUserId', currentUserId, '!= auth.uid()', authData.user.id);
+    }
+
     const projectRows = state.projects.map((p, i) => ({
       id: p.id,
       user_id: currentUserId,
@@ -231,24 +254,32 @@ async function syncToSupabase() {
     const delProjects = [...dbSnapshot.projectIds].filter(id => !curProjectIds.has(id));
     const delTasks = [...dbSnapshot.taskIds].filter(id => !curTaskIds.has(id));
 
+    console.log('[sync] writing', projectRows.length, 'projects,', taskRows.length, 'tasks | deleting',
+      delProjects.length, 'projects,', delTasks.length, 'tasks');
+
     // Clear today's today_tasks first so deleting tasks can't trip a FK.
     let res = await supabaseClient.from('today_tasks').delete().eq('user_id', currentUserId).eq('date', today);
+    console.log('[sync] today_tasks delete result:', res.data, res.error);
     if (res.error) throw res.error;
 
     if (projectRows.length) {
-      res = await supabaseClient.from('projects').upsert(projectRows);
+      res = await supabaseClient.from('projects').upsert(projectRows).select();
+      console.log('[sync] projects upsert result:', res.data, res.error);
       if (res.error) throw res.error;
     }
     if (taskRows.length) {
-      res = await supabaseClient.from('tasks').upsert(taskRows);
+      res = await supabaseClient.from('tasks').upsert(taskRows).select();
+      console.log('[sync] tasks upsert result:', res.data, res.error);
       if (res.error) throw res.error;
     }
     if (delTasks.length) {
       res = await supabaseClient.from('tasks').delete().in('id', delTasks);
+      console.log('[sync] tasks delete result:', res.data, res.error);
       if (res.error) throw res.error;
     }
     if (delProjects.length) {
       res = await supabaseClient.from('projects').delete().in('id', delProjects);
+      console.log('[sync] projects delete result:', res.data, res.error);
       if (res.error) throw res.error;
     }
     if (state.todayTasks.length) {
@@ -257,23 +288,32 @@ async function syncToSupabase() {
         date: today,
         task_id: taskId
       }));
-      res = await supabaseClient.from('today_tasks').insert(rows);
+      res = await supabaseClient.from('today_tasks').insert(rows).select();
+      console.log('[sync] today_tasks insert result:', res.data, res.error);
       if (res.error) throw res.error;
     }
 
     dbSnapshot.projectIds = curProjectIds;
     dbSnapshot.taskIds = curTaskIds;
+    console.log('[sync] ✅ completed successfully.');
   } catch (e) {
-    console.warn('Supabase sync failed', e);
+    // Surface the full Supabase error (message / details / hint / code) — an RLS
+    // policy rejection shows up here, e.g. code "42501" / "violates row-level
+    // security policy". This is the most common reason a write silently fails.
+    console.error('[sync] ❌ FAILED:', e, '| message:', e && e.message,
+      '| details:', e && e.details, '| hint:', e && e.hint, '| code:', e && e.code);
     showToast('저장 중 오류가 발생했어요. 다시 시도해주세요.');
   }
 }
 
 // Insert a single completed pomodoro session.
 async function insertSession(s) {
-  if (!currentUserId) return;
+  if (!currentUserId) {
+    console.warn('[insertSession] skipped — no currentUserId.');
+    return;
+  }
   try {
-    const { error } = await supabaseClient.from('pomodoro_sessions').insert({
+    const { data, error } = await supabaseClient.from('pomodoro_sessions').insert({
       id: s.id,
       user_id: currentUserId,
       project_id: s.projectId,
@@ -285,10 +325,12 @@ async function insertSession(s) {
       start_time: s.startTime,
       end_time: s.endTime,
       minutes: s.minutes
-    });
+    }).select();
+    console.log('[insertSession] result:', data, error);
     if (error) throw error;
   } catch (e) {
-    console.warn('Failed to save session', e);
+    console.error('[insertSession] ❌ FAILED:', e, '| message:', e && e.message,
+      '| details:', e && e.details, '| hint:', e && e.hint, '| code:', e && e.code);
     showToast('저장 중 오류가 발생했어요. 다시 시도해주세요.');
   }
 }
