@@ -2117,12 +2117,16 @@ async function setupAuth() {
     });
   }
 
-  // React to login/logout (also fires once with the current session).
-  supabaseClient.auth.onAuthStateChange((_event, session) => { handleSession(session); });
-
-  // Resolve the current session on load.
+  // Resolve the current session first and fully, so the initial screen is
+  // decided by getSession() rather than by an early onAuthStateChange event.
   const { data: { session } } = await supabaseClient.auth.getSession();
   await handleSession(session);
+  // Auth check is done — dismiss the boot overlay regardless of the outcome.
+  // (In the signed-in branch startApp() already hid it; this covers no-session.)
+  showLoading(false);
+
+  // Only now react to *subsequent* login/logout changes.
+  supabaseClient.auth.onAuthStateChange((_event, session) => { handleSession(session); });
 }
 
 // Loads the signed-in user's data, runs the daily housekeeping, and renders.

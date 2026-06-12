@@ -11,16 +11,16 @@
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<!-- Login screen (shown until authenticated) -->
-<div class="login-screen" id="login-screen">
+<!-- Login screen (hidden until the auth check resolves with no session) -->
+<div class="login-screen hidden" id="login-screen">
   <div class="login-inner">
     <div class="login-logo">φ Phi</div>
     <button class="google-btn" id="google-login-btn">Google로 시작하기</button>
   </div>
 </div>
 
-<!-- Loading overlay -->
-<div class="loading-overlay" id="loading-overlay">
+<!-- Loading overlay (shown on first paint until the auth check resolves) -->
+<div class="loading-overlay show" id="loading-overlay">
   <div class="loading-spinner"></div>
 </div>
 
