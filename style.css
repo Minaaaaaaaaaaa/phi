@@ -87,6 +87,16 @@
     display: block;
   }
 
+  /* Boot: before app.js runs there is no .active anywhere, so the tab recorded
+     on <html> by the inline script in index.html decides what the first paint
+     shows. applyTabClasses() keeps data-tab in sync from then on, so this rule
+     and .view.active always point at the same view. */
+  :root[data-tab="today"] #today-view,
+  :root[data-tab="projects"] #projects-view,
+  :root[data-tab="weekly"] #weekly-view {
+    display: block;
+  }
+
   .header {
     margin-bottom: 24px;
     display: flex;

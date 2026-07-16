@@ -5,6 +5,23 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <meta name="theme-color" content="#F9F9F7">
 <title>Phi</title>
+<script>
+  // Boot: record the saved tab on <html> before any stylesheet or markup is
+  // parsed, so the very first paint already shows the right view (see the
+  // :root[data-tab] rules in style.css). Runs synchronously and depends on
+  // nothing else -- no defer/async, no SDK. It only marks which tab is active;
+  // all data loading and rendering still happens after DOMContentLoaded.
+  (function () {
+    var tab = 'today';
+    try {
+      var saved = localStorage.getItem('activeTab');
+      if (saved === 'today' || saved === 'projects' || saved === 'weekly') tab = saved;
+    } catch (e) {
+      // Storage unavailable (private mode, blocked cookies) -- keep the default.
+    }
+    document.documentElement.setAttribute('data-tab', tab);
+  })();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Onest:wght@400;500;700&display=swap" rel="stylesheet">
@@ -37,8 +54,9 @@
 </nav>
 
 <div class="app">
-  <!-- Today view -->
-  <div class="view active" id="today-view">
+  <!-- Today view. No hardcoded .active: the boot script's <html data-tab>
+       decides the initial view, and applyTabClasses() takes over after that. -->
+  <div class="view" id="today-view">
     <div class="header">
       <div>
         <h1 class="header-title">Today</h1>

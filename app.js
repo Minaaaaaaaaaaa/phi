@@ -42,6 +42,7 @@ let pomo = {
 let phiSessions = []; // global flat array of completed pomodoro sessions
 let weekOffset = 0;   // 0 = current week, -1 = previous, +1 = next
 let dayStartHour = 0; // first hour shown at the top of the calendar grid (00:00)
+let activeTab = 'today'; // 'today' | 'projects' | 'weekly'; restored on load
 
 let sheetState = {
   newProject: { subtasks: [], editingId: null, dateRef: { deadline: '', repeat: null, repeatDay: null, repeatDate: null } }
@@ -57,6 +58,9 @@ function loadUIPrefs() {
   }
   const ds = parseInt(localStorage.getItem('weeklyDayStart'), 10);
   if (!isNaN(ds)) dayStartHour = ds;
+  // Guard against a stale/unknown value leaving every view inactive.
+  const tab = localStorage.getItem('activeTab');
+  if (tab === 'today' || tab === 'projects' || tab === 'weekly') activeTab = tab;
 }
 
 function saveUIPrefs() {
@@ -1469,11 +1473,22 @@ function togglePomo() {
 }
 
 // ---------- Tabs ----------
-function switchTab(name) {
+// Which tab is visible, expressed purely as DOM classes. Touches no app data,
+// so it can run before the auth/data round-trips have finished.
+function applyTabClasses(name) {
+  // Keep <html data-tab> in step with .active so the boot rule in style.css and
+  // .view.active never point at two different views.
+  document.documentElement.setAttribute('data-tab', name);
   document.querySelectorAll('.tab-btn, .top-nav-links a').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.getElementById('today-view').classList.toggle('active', name === 'today');
   document.getElementById('projects-view').classList.toggle('active', name === 'projects');
   document.getElementById('weekly-view').classList.toggle('active', name === 'weekly');
+}
+
+function switchTab(name) {
+  activeTab = name;
+  localStorage.setItem('activeTab', name);
+  applyTabClasses(name);
   // The document body is the scroller; reset it on tab change so each tab opens
   // at the top. Weekly manages its own scroll position via renderWeekly().
   if (name === 'weekly') renderWeekly();
@@ -2026,22 +2041,29 @@ async function startApp() {
   } catch (e) {
     console.warn('Initial load failed', e);
     showToast('저장 중 오류가 발생했어요. 다시 시도해주세요.');
-  } finally {
-    showLoading(false);
   }
-  runDailyCleanupIfNeeded();
-  scheduleMidnightCleanup();
-  renderToday();
-  renderProjects();
-  renderPomo();
-  if (document.getElementById('weekly-view').classList.contains('active')) {
-    renderWeekly();
+  try {
+    runDailyCleanupIfNeeded();
+    scheduleMidnightCleanup();
+    renderToday();
+    renderProjects();
+    // Restore the tab the user was last on. switchTab() covers renderPomo() and,
+    // for weekly, renderWeekly().
+    switchTab(activeTab);
+  } finally {
+    // Lift the boot overlay only once the right tab is rendered, so it never
+    // uncovers the wrong one. finally: a render throwing must not strand it.
+    showLoading(false);
   }
 }
 
 // ---------- Wire events ----------
 function init() {
   loadUIPrefs();
+  // Reflect the restored tab in the DOM right away — localStorage is synchronous,
+  // so this lands before the auth and data round-trips instead of after them.
+  // Rendering still happens later in startApp(), once data exists.
+  applyTabClasses(activeTab);
   setupAuth();
 
   document.querySelectorAll('.tab-btn').forEach(b => {
