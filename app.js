@@ -25,8 +25,8 @@ let state = {
   projects: [],
   todayTasks: [],
   todayDate: null,
-  dismissedRollovers: [], // session-only
-  rollovers: [] // {projectId, taskName, taskId}
+  dismissedRollovers: [], // session-only, holds rollover keys
+  rollovers: [] // session-only, {key, projectId, taskId, taskName}
 };
 
 let pomo = {
@@ -318,11 +318,6 @@ function uid() {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4);
 }
 
-function todayKey() {
-  const d = new Date();
-  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-}
-
 function pad(n) { return String(n).padStart(2, '0'); }
 
 function startOfDay(d) {
@@ -348,7 +343,7 @@ function fmtDeadline(iso) {
   if (days === 0) return '오늘';
   if (days < 0) return `${-days}일 지남`;
   if (days < 7) return `${days}일 남음`;
-  return (d.getMonth() + 1) + '월 ' + d.getDate() + '일';
+  return fmtKoreanShortDate(d);
 }
 
 // True when a deadline is in the past (rendered in red on task rows).
@@ -358,26 +353,43 @@ function deadlinePassed(iso) {
   return diffDays(d, startOfDay(new Date())) < 0;
 }
 
-function addDays(iso, days) {
-  const d = new Date(iso + 'T00:00:00');
-  d.setDate(d.getDate() + days);
+// Date -> "YYYY-MM-DD" (local time). The single source of truth for ISO keys.
+function dateISOFromDate(d) {
   return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
 }
 
+function addDays(iso, days) {
+  const d = new Date(iso + 'T00:00:00');
+  d.setDate(d.getDate() + days);
+  return dateISOFromDate(d);
+}
+
 function todayISO() {
-  const d = new Date();
-  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
+  return dateISOFromDate(new Date());
 }
 
 function blankSubtask() {
   return { id: uid(), text: '', deadline: '', repeat: null, repeatDay: null, repeatDate: null };
 }
 
+// A fresh, incomplete task built from a new-project subtask draft.
+function taskFromSubtask(s) {
+  return {
+    id: uid(),
+    text: s.text.trim(),
+    completed: false,
+    deadline: s.deadline || null,
+    completedAt: null,
+    repeat: s.repeat || null,
+    repeatDay: typeof s.repeatDay === 'number' ? s.repeatDay : null,
+    repeatDate: typeof s.repeatDate === 'number' ? s.repeatDate : null
+  };
+}
+
 // "YYYY-MM-DD" -> "N월 N일"
 function fmtKoreanMonthDay(iso) {
   if (!iso) return '';
-  const d = new Date(iso + 'T00:00:00');
-  return (d.getMonth() + 1) + '월 ' + d.getDate() + '일';
+  return fmtKoreanShortDate(new Date(iso + 'T00:00:00'));
 }
 
 function clockHHMM() {
@@ -693,6 +705,16 @@ function rolloverPastDeadlines() {
 }
 
 // ---------- Render: Today ----------
+// Wire every [data-toggle] checkbox within `container` to toggleTask.
+function wireTaskToggles(container) {
+  container.querySelectorAll('[data-toggle]').forEach(el => {
+    el.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleTask(el.dataset.toggle);
+    });
+  });
+}
+
 function renderToday() {
   document.getElementById('today-date').textContent = fmtTodayHeader();
 
@@ -797,12 +819,7 @@ function renderToday() {
   document.getElementById('open-picker').addEventListener('click', openPicker);
 
   // Wire checkboxes + focus
-  content.querySelectorAll('[data-toggle]').forEach(el => {
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleTask(el.dataset.toggle);
-    });
-  });
+  wireTaskToggles(content);
   content.querySelectorAll('[data-focus]').forEach(el => {
     el.addEventListener('click', () => setPomoTask(el.dataset.focus));
   });
@@ -892,12 +909,7 @@ function renderProjects() {
     content.appendChild(card);
   }
 
-  content.querySelectorAll('[data-toggle]').forEach(el => {
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      toggleTask(el.dataset.toggle);
-    });
-  });
+  wireTaskToggles(content);
   content.querySelectorAll('[data-expand]').forEach(el => {
     el.addEventListener('click', () => {
       const p = state.projects.find(x => x.id === el.dataset.expand);
@@ -1183,10 +1195,6 @@ function getWeekDates(offset) {
   return days;
 }
 
-function dateISOFromDate(d) {
-  return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
-}
-
 function fmtKoreanShortDate(d) {
   return (d.getMonth() + 1) + '월 ' + d.getDate() + '일';
 }
@@ -1436,9 +1444,8 @@ function pomoRemainingFromClock() {
 // tab throttling), update the display, and complete the phase if time is up.
 function tickPomo() {
   if (!pomo.running || pomo.startedAt == null) return;
-  const remainingMs = pomo.durationMs - (Date.now() - pomo.startedAt);
-  pomo.remaining = Math.max(0, Math.ceil(remainingMs / 1000));
-  if (remainingMs <= 0) {
+  pomo.remaining = pomoRemainingFromClock();
+  if (pomo.remaining <= 0) {
     completePomoPhase();
     return;
   }
@@ -1837,16 +1844,7 @@ function saveProject() {
             repeatDate: typeof s.repeatDate === 'number' ? s.repeatDate : null
           };
         }
-        return {
-          id: uid(),
-          text: s.text.trim(),
-          completed: false,
-          deadline: s.deadline || null,
-          completedAt: null,
-          repeat: s.repeat || null,
-          repeatDay: typeof s.repeatDay === 'number' ? s.repeatDay : null,
-          repeatDate: typeof s.repeatDate === 'number' ? s.repeatDate : null
-        };
+        return taskFromSubtask(s);
       });
     // Drop any todayTasks that pointed to removed subtasks
     state.todayTasks = state.todayTasks.filter(taskId => findTask(taskId));
@@ -1854,16 +1852,7 @@ function saveProject() {
   } else {
     const subtasks = sheetState.newProject.subtasks
       .filter(s => s.text.trim())
-      .map(s => ({
-        id: uid(),
-        text: s.text.trim(),
-        completed: false,
-        deadline: s.deadline || null,
-        completedAt: null,
-        repeat: s.repeat || null,
-        repeatDay: typeof s.repeatDay === 'number' ? s.repeatDay : null,
-        repeatDate: typeof s.repeatDate === 'number' ? s.repeatDate : null
-      }));
+      .map(taskFromSubtask);
     const project = {
       id: uid(),
       name,
@@ -2227,7 +2216,7 @@ function init() {
   // Check for day change every minute
   setInterval(() => {
     if (!currentUserId) return;
-    const today = todayKey();
+    const today = todayISO();
     if (state.todayDate !== today) {
       clearCompletedFromToday();
       state.todayDate = today;
