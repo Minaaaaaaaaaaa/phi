@@ -245,11 +245,11 @@ async function syncToSupabase() {
     if (res.error) throw res.error;
 
     if (projectRows.length) {
-      res = await supabaseClient.from('projects').upsert(projectRows).select();
+      res = await supabaseClient.from('projects').upsert(projectRows);
       if (res.error) throw res.error;
     }
     if (taskRows.length) {
-      res = await supabaseClient.from('tasks').upsert(taskRows).select();
+      res = await supabaseClient.from('tasks').upsert(taskRows);
       if (res.error) throw res.error;
     }
     if (delTasks.length) {
@@ -266,7 +266,7 @@ async function syncToSupabase() {
         date: today,
         task_id: taskId
       }));
-      res = await supabaseClient.from('today_tasks').insert(rows).select();
+      res = await supabaseClient.from('today_tasks').insert(rows);
       if (res.error) throw res.error;
     }
 
@@ -459,10 +459,10 @@ function showToast(text) {
 }
 
 // ---------- Pomodoro session stats ----------
-// All sessions belonging to a project: legacy inline sessions + the global
-// pomodoroSessions array. Shared by the time stats, today total, and heatmap.
+// All sessions belonging to a project. Shared by the time stats, today total,
+// and heatmap.
 function projectSessions(project) {
-  return (project.sessions || []).concat(phiSessions.filter(s => s.projectId === project.id));
+  return phiSessions.filter(s => s.projectId === project.id);
 }
 
 function projectTimeStats(project) {
