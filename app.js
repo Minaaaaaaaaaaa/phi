@@ -24,9 +24,7 @@ let dbSnapshot = { projectHashes: new Map(), taskHashes: new Map(), todaySig: nu
 let state = {
   projects: [],
   todayTasks: [],
-  todayDate: null,
-  dismissedRollovers: [], // session-only, holds rollover keys
-  rollovers: [] // session-only, {key, projectId, taskId, taskName}
+  todayDate: null
 };
 
 let pomo = {
@@ -46,7 +44,7 @@ let weekOffset = 0;   // 0 = current week, -1 = previous, +1 = next
 let dayStartHour = 0; // first hour shown at the top of the calendar grid (00:00)
 
 let sheetState = {
-  newProject: { buffer: 7, subtasks: [], editingId: null, dateRef: { deadline: '', repeat: null, repeatDay: null, repeatDate: null } }
+  newProject: { subtasks: [], editingId: null, dateRef: { deadline: '', repeat: null, repeatDay: null, repeatDate: null } }
 };
 
 // ---------- UI preferences (localStorage) ----------
@@ -101,7 +99,6 @@ async function loadFromSupabase() {
     name: p.name,
     color: p.color,
     targetDate: p.target_date,
-    bufferDate: p.buffer_date,
     createdAt: p.created_at,
     completedCount: p.completed_count,
     totalCount: p.total_count,
@@ -222,7 +219,6 @@ function buildProjectRows() {
     color: p.color,
     order_index: i,
     target_date: p.targetDate || null,
-    buffer_date: p.bufferDate || null,
     created_at: p.createdAt,
     completed_count: p.completedCount || 0,
     total_count: p.totalCount || 0
@@ -610,41 +606,6 @@ function recordPomoSession(taskId, minutes, startTime) {
   insertSession(session);
 }
 
-// ---------- Pace calculations ----------
-// level 1 = on track (gap < 0.15)
-// level 2 = slightly behind (0.15 <= gap < 0.30)
-// level 3 = significantly behind (gap >= 0.30)
-function paceStatus(project) {
-  // Pace is driven by cumulative completion (completedCount / totalCount), which
-  // survives the midnight cleanup of completed sub-tasks.
-  const total = (typeof project.totalCount === 'number' && project.totalCount > 0)
-    ? project.totalCount
-    : project.tasks.length;
-  if (total === 0) return { level: 1, daysBehind: 0, pct: 0, completed: 0, total: 0 };
-
-  const completed = (typeof project.completedCount === 'number')
-    ? project.completedCount
-    : project.tasks.filter(t => t.completed).length;
-  const pct = Math.min(1, completed / total);
-
-  const createdAt = startOfDay(new Date(project.createdAt));
-  const today = startOfDay(new Date());
-  const buffer = startOfDay(new Date(project.bufferDate + 'T00:00:00'));
-  const totalDays = Math.max(1, diffDays(buffer, createdAt));
-  const elapsed = Math.max(0, diffDays(today, createdAt));
-  const expectedPct = Math.min(1, elapsed / totalDays);
-
-  const gap = expectedPct - pct; // positive means behind
-  let level = 1;
-  if (gap >= 0.30) level = 3;
-  else if (gap >= 0.15) level = 2;
-
-  const progressInDays = pct * totalDays;
-  const daysBehind = Math.max(0, Math.round(elapsed - progressInDays));
-
-  return { level, daysBehind, pct: Math.round(pct * 100), expectedPct: Math.round(expectedPct * 100), completed, total };
-}
-
 // ---------- Daily cleanup: drop completed sub-tasks ----------
 function cleanupCompletedSubtasks() {
   let changed = false;
@@ -740,33 +701,6 @@ function scheduleMidnightCleanup() {
   }, ms);
 }
 
-// ---------- Auto-rollover ----------
-function rolloverPastDeadlines() {
-  const today = todayISO();
-  state.rollovers = [];
-  let changed = false;
-
-  for (const p of state.projects) {
-    for (const t of p.tasks) {
-      if (!t.completed && t.deadline && t.deadline < today) {
-        const newDeadline = addDays(today, 7);
-        t.deadline = newDeadline;
-        const rolloverKey = p.id + ':' + t.id + ':' + today;
-        if (!state.dismissedRollovers.includes(rolloverKey)) {
-          state.rollovers.push({
-            key: rolloverKey,
-            projectId: p.id,
-            taskId: t.id,
-            taskName: t.text
-          });
-        }
-        changed = true;
-      }
-    }
-  }
-  if (changed) save();
-}
-
 // ---------- Render: Today ----------
 // Wire every [data-toggle] checkbox within `container` to toggleTask.
 function wireTaskToggles(container) {
@@ -780,25 +714,6 @@ function wireTaskToggles(container) {
 
 function renderToday() {
   document.getElementById('today-date').textContent = fmtTodayHeader();
-
-  const banners = document.getElementById('today-banners');
-  banners.innerHTML = '';
-
-  // Pace warning banner — only level 3 (significantly behind), first project
-  const behind = state.projects
-    .map(p => ({ p, status: paceStatus(p) }))
-    .filter(x => x.status.level === 3 && x.status.daysBehind > 0);
-
-  if (behind.length > 0) {
-    const { p, status } = behind[0];
-    const div = document.createElement('div');
-    div.className = 'banner banner-amber';
-    div.innerHTML = `
-      <div class="banner-icon">⚠</div>
-      <div class="banner-body"><strong>${escapeHtml(p.name)}</strong> is ${status.daysBehind} day${status.daysBehind === 1 ? '' : 's'} behind. Add one more task to catch up.</div>
-    `;
-    banners.appendChild(div);
-  }
 
   const content = document.getElementById('today-content');
   content.innerHTML = '';
@@ -909,13 +824,10 @@ function renderProjects() {
   }
 
   for (const project of state.projects) {
-    const status = paceStatus(project);
     const timeStats = projectTimeStats(project);
     const card = document.createElement('div');
-    card.className = 'project-card' + (status.level === 3 ? ' behind-significant' : '');
+    card.className = 'project-card';
     card.dataset.projectId = project.id;
-
-    const rolloversForProject = state.rollovers.filter(r => r.projectId === project.id);
 
     const expanded = project._expanded || false;
     const visibleTasks = expanded ? project.tasks : project.tasks.slice(0, 5);
@@ -945,21 +857,10 @@ function renderProjects() {
           </div>
         </div>
       </div>
-      ${rolloversForProject.map(r => `
-        <div class="banner banner-amber" data-rollover-banner="${r.key}">
-          <div class="banner-icon">↻</div>
-          <div class="banner-body">'${escapeHtml(r.taskName)}' deadline passed — moved to next week.</div>
-          <button class="banner-close" data-dismiss-rollover="${r.key}">×</button>
-        </div>`).join('')}
       <div class="project-heat-row">
         <div class="project-heatmap">${heatBoxes}</div>
         <button class="project-time-inline" data-time-toggle="${project.id}">${escapeHtml(timeText)}</button>
       </div>
-      ${status.level === 2
-        ? `<div class="pace-soft">조금 뒤처지고 있어요 — 오늘 1개만 더 해보세요</div>`
-        : status.level === 3
-          ? `<div class="pace-strip pace-behind">⚠ ${status.daysBehind}일 뒤처졌어요 — 오늘 1개만 더 하면 만회할 수 있어요</div>`
-          : ''}
       <div class="project-tasks">
         ${visibleTasks.map(t => `
           <div class="project-task ${t.completed ? 'completed' : ''}" data-task-row="${t.id}">
@@ -1025,14 +926,6 @@ function renderProjects() {
       if (confirm(`Delete "${project.name}"?`)) {
         deleteProject(id);
       }
-    });
-  });
-  content.querySelectorAll('[data-dismiss-rollover]').forEach(el => {
-    el.addEventListener('click', () => {
-      const key = el.dataset.dismissRollover;
-      state.dismissedRollovers.push(key);
-      state.rollovers = state.rollovers.filter(r => r.key !== key);
-      renderProjects();
     });
   });
 
@@ -1634,12 +1527,8 @@ function openProjectSheet(projectId) {
   const editing = projectId ? state.projects.find(p => p.id === projectId) : null;
 
   if (editing) {
-    const target = new Date(editing.targetDate + 'T00:00:00');
-    const buffer = new Date(editing.bufferDate + 'T00:00:00');
-    const bufferDays = Math.max(0, Math.round((buffer - target) / DAY_MS));
     sheetState.newProject = {
       editingId: projectId,
-      buffer: bufferDays,
       dateRef: { deadline: editing.targetDate || '', repeat: null, repeatDay: null, repeatDate: null },
       subtasks: editing.tasks.map(t => ({
         id: t.id,
@@ -1656,7 +1545,6 @@ function openProjectSheet(projectId) {
   } else {
     sheetState.newProject = {
       editingId: null,
-      buffer: 7,
       dateRef: { deadline: '', repeat: null, repeatDay: null, repeatDate: null },
       subtasks: [blankSubtask(), blankSubtask()]
     };
@@ -1664,10 +1552,6 @@ function openProjectSheet(projectId) {
     document.querySelector('#new-project-sheet .sheet-title').textContent = 'New project';
     document.getElementById('np-save').textContent = 'Save project';
   }
-
-  document.querySelectorAll('#np-buffer-pills .buffer-pill').forEach(b => {
-    b.classList.toggle('active', parseInt(b.dataset.buffer) === sheetState.newProject.buffer);
-  });
 
   renderProjectDateField();
   renderNewProjectSubtasks();
@@ -1843,25 +1727,11 @@ function renderProjectDateField() {
   const iso = sheetState.newProject.dateRef.deadline;
   label.textContent = iso ? fmtKoreanMonthDay(iso) : '';
   wrap.classList.toggle('has-date', !!iso);
-  updateBufferNote();
 }
 
 function openProjectDateCalendar() {
   const wrap = document.getElementById('np-date-wrap');
   openSubtaskCalendar(sheetState.newProject.dateRef, wrap, renderProjectDateField);
-}
-
-function updateBufferNote() {
-  const targetVal = sheetState.newProject.dateRef.deadline;
-  const note = document.getElementById('np-buffer-note');
-  if (!targetVal) {
-    note.textContent = 'Pick a finish date to see your buffer.';
-    return;
-  }
-  const buffered = addDays(targetVal, sheetState.newProject.buffer);
-  const d = new Date(buffered + 'T00:00:00');
-  const formatted = d.toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric' });
-  note.textContent = `You have until ${formatted} — no stress.`;
 }
 
 function saveProject() {
@@ -1876,7 +1746,6 @@ function saveProject() {
     return;
   }
 
-  const buffered = addDays(target, sheetState.newProject.buffer);
   const editingId = sheetState.newProject.editingId;
 
   if (editingId) {
@@ -1884,7 +1753,6 @@ function saveProject() {
     if (!project) { closeSheets(); return; }
     project.name = name;
     project.targetDate = target;
-    project.bufferDate = buffered;
     // Grow totalCount by however many brand-new sub-tasks were added in this edit.
     const addedCount = sheetState.newProject.subtasks
       .filter(s => s.text.trim() && !project.tasks.find(t => t.id === s.id)).length;
@@ -1921,7 +1789,6 @@ function saveProject() {
       name,
       color: nextColor(),
       targetDate: target,
-      bufferDate: buffered,
       createdAt: new Date().toISOString(),
       tasks: subtasks,
       completedCount: 0,
@@ -2162,7 +2029,6 @@ async function startApp() {
   } finally {
     showLoading(false);
   }
-  rolloverPastDeadlines();
   runDailyCleanupIfNeeded();
   scheduleMidnightCleanup();
   renderToday();
@@ -2193,14 +2059,6 @@ function init() {
   // Close any open menu dropdowns on outside click
   document.addEventListener('click', closeAllMenus);
 
-  document.querySelectorAll('#np-buffer-pills .buffer-pill').forEach(b => {
-    b.addEventListener('click', () => {
-      sheetState.newProject.buffer = parseInt(b.dataset.buffer);
-      document.querySelectorAll('#np-buffer-pills .buffer-pill').forEach(x => x.classList.remove('active'));
-      b.classList.add('active');
-      updateBufferNote();
-    });
-  });
   document.getElementById('np-cal-btn').addEventListener('click', openProjectDateCalendar);
 
   document.getElementById('np-add-subtask').addEventListener('click', () => {
@@ -2283,9 +2141,7 @@ function init() {
     if (state.todayDate !== today) {
       clearCompletedFromToday();
       state.todayDate = today;
-      state.dismissedRollovers = [];
       save();
-      rolloverPastDeadlines();
       renderToday();
       renderProjects();
     }

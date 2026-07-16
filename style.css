@@ -7,10 +7,6 @@
     --text-muted: var(--text-muted);
     --purple: #8b7fff;
     --teal: #00b99a;
-    --amber-bg: #faeeda;
-    --amber-text: #854f0b;
-    --green-bg: #eaf3de;
-    --green-text: #3b6d11;
     --dark: #363144;
   }
 
@@ -183,42 +179,6 @@
 
   .icon-btn:active {
     background: var(--border);
-  }
-
-  /* Banners */
-  .banner {
-    border-radius: 12px;
-    padding: 12px 14px;
-    margin-bottom: 16px;
-    display: flex;
-    gap: 10px;
-    align-items: flex-start;
-    font-size: 14px;
-    line-height: 1.45;
-  }
-
-  .banner-amber {
-    background: var(--amber-bg);
-    color: var(--amber-text);
-  }
-
-  .banner-icon {
-    flex-shrink: 0;
-    font-size: 16px;
-    line-height: 1.3;
-  }
-
-  .banner-body {
-    flex: 1;
-  }
-
-  .banner-close {
-    background: none;
-    color: inherit;
-    font-size: 18px;
-    opacity: 0.6;
-    line-height: 1;
-    padding: 0 0 0 6px;
   }
 
   /* Tasks */
@@ -566,33 +526,6 @@
     font-size: 13px;
     font-weight: 500;
     padding: 4px 0;
-  }
-
-  .pace-strip {
-    border-radius: 100px;
-    padding: 6px 12px;
-    font-size: 12px;
-    font-weight: 500;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    margin-bottom: 12px;
-  }
-
-  .pace-behind {
-    background: var(--amber-bg);
-    color: var(--amber-text);
-  }
-
-  .pace-soft {
-    font-size: 11px;
-    color: var(--text-secondary);
-    line-height: 1.4;
-    margin-bottom: 12px;
-  }
-
-  .project-card.behind-significant {
-    border-color: #BA7517;
   }
 
   /* Per-project pomodoro time — inline toggle pill in the card header */
@@ -1123,7 +1056,6 @@
   /* var(--text-muted) text in the project create/edit popup */
   #new-project-sheet .sheet-close,
   #new-project-sheet .input-label,
-  #new-project-sheet .buffer-pill,
   #new-project-sheet .add-subtask-row {
     color: var(--text-muted);
   }
@@ -1131,43 +1063,6 @@
   /* var(--text-muted) "Done" link in the Add to today popup */
   #picker-sheet .sheet-close {
     color: var(--text-muted);
-  }
-
-  #new-project-sheet .buffer-pill.active {
-    color: #fff;
-  }
-
-  .buffer-pills {
-    display: flex;
-    gap: 8px;
-    margin-top: 6px;
-  }
-
-  .buffer-pill {
-    flex: 1;
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 100px;
-    padding: 10px;
-    font-size: 13px;
-    font-weight: 500;
-    color: var(--text);
-    transition: all 0.15s;
-  }
-
-  .buffer-pill.active {
-    background: var(--purple);
-    border-color: var(--purple);
-    color: #fff;
-  }
-
-  .buffer-note {
-    margin-top: 10px;
-    padding: 10px 12px;
-    background: var(--green-bg);
-    color: var(--green-text);
-    border-radius: 12px;
-    font-size: 13px;
   }
 
   .subtask-row {
