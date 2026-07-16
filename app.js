@@ -18,7 +18,7 @@ const supabaseClient = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_
 let currentUserId = null;   // auth.uid() for all data operations
 let appStarted = false;     // guards one-time data load after first auth
 // Ids known to exist in Supabase, used to compute deletes when syncing.
-let dbSnapshot = { projectIds: new Set(), taskIds: new Set() };
+let dbSnapshot = { projectHashes: new Map(), taskHashes: new Map(), todaySig: null };
 
 // ---------- State ----------
 let state = {
@@ -74,13 +74,29 @@ async function loadFromSupabase() {
     return;
   }
 
-  const { data: projectRows, error: pErr } = await supabaseClient.from('projects')
-    .select('*')
-    .eq('user_id', currentUserId)
-    .order('order_index');
-  if (pErr) throw pErr;
+  // Fetch projects, tasks, and today's today_tasks in parallel. None depends on
+  // another's result now that tasks are keyed by user_id rather than by the
+  // project ids returned from the projects query.
+  const today = todayISO();
+  const [projectsRes, tasksRes, todayRes] = await Promise.all([
+    supabaseClient.from('projects')
+      .select('*')
+      .eq('user_id', currentUserId)
+      .order('order_index'),
+    supabaseClient.from('tasks')
+      .select('*')
+      .eq('user_id', currentUserId)
+      .order('order_index'),
+    supabaseClient.from('today_tasks')
+      .select('*')
+      .eq('user_id', currentUserId)
+      .eq('date', today)
+  ]);
+  if (projectsRes.error) throw projectsRes.error;
+  if (tasksRes.error) throw tasksRes.error;
+  if (todayRes.error) throw todayRes.error;
 
-  const projects = (projectRows || []).map(p => ({
+  const projects = (projectsRes.data || []).map(p => ({
     id: p.id,
     name: p.name,
     color: p.color,
@@ -94,16 +110,9 @@ async function loadFromSupabase() {
   const byId = {};
   projects.forEach(p => { byId[p.id] = p; });
 
-  let taskRows = [];
-  if (projects.length) {
-    const { data, error: tErr } = await supabaseClient.from('tasks')
-      .select('*')
-      .in('project_id', projects.map(p => p.id))
-      .order('order_index');
-    if (tErr) throw tErr;
-    taskRows = data || [];
-  }
-  for (const t of taskRows) {
+  // Tasks arrive ordered by order_index; pushing per-project preserves each
+  // project's task order even though the flat result interleaves projects.
+  for (const t of (tasksRes.data || [])) {
     const project = byId[t.project_id];
     if (!project) continue;
     project.tasks.push({
@@ -129,14 +138,8 @@ async function loadFromSupabase() {
 
   state.projects = projects;
 
-  // Today tasks (for today's date only)
-  const today = todayISO();
-  const { data: todayRows, error: ttErr } = await supabaseClient.from('today_tasks')
-    .select('*')
-    .eq('user_id', currentUserId)
-    .eq('date', today);
-  if (ttErr) throw ttErr;
-  state.todayTasks = (todayRows || [])
+  // Today tasks — filtered against the now-populated state.projects.
+  state.todayTasks = (todayRes.data || [])
     .map(r => r.task_id)
     .filter(id => findTask(id));
   state.todayDate = today;
@@ -158,11 +161,14 @@ async function loadFromSupabase() {
     endTime: s.end_time,
     minutes: s.minutes
   }));
+  invalidateSessionsCache();
 
-  // Snapshot the ids that exist in Supabase so syncs can compute deletions.
-  dbSnapshot.projectIds = new Set(projects.map(p => p.id));
-  dbSnapshot.taskIds = new Set();
-  projects.forEach(p => p.tasks.forEach(t => dbSnapshot.taskIds.add(t.id)));
+  // Snapshot the current rows so syncs can compute both changes and deletions.
+  // Built with the same helpers the sync uses, so hashes line up and an
+  // unchanged first sync writes nothing.
+  dbSnapshot.projectHashes = new Map(buildProjectRows().map(r => [r.id, rowHash(r)]));
+  dbSnapshot.taskHashes = new Map(buildTaskRows().map(r => [r.id, rowHash(r)]));
+  dbSnapshot.todaySig = todayTasksSignature(today);
 }
 
 // ---------- Supabase: sync ----------
@@ -194,6 +200,58 @@ async function runSync() {
   syncing = false;
 }
 
+// today_tasks carries no order, so a date + sorted id set fully identifies the
+// day's list. Used to skip the delete+insert round-trips when nothing changed.
+function todayTasksSignature(dateKey) {
+  return dateKey + '|' + [...state.todayTasks].sort().join(',');
+}
+
+// Stable content hash for change detection. Keys are always emitted in the same
+// order by the builders below, so JSON.stringify is deterministic here.
+function rowHash(obj) {
+  return JSON.stringify(obj);
+}
+
+// The exact rows a full sync would write. Shared by the sync diff and by the
+// post-load snapshot so their hashes line up and the first sync writes nothing.
+function buildProjectRows() {
+  return state.projects.map((p, i) => ({
+    id: p.id,
+    user_id: currentUserId,
+    name: p.name,
+    color: p.color,
+    order_index: i,
+    target_date: p.targetDate || null,
+    buffer_date: p.bufferDate || null,
+    created_at: p.createdAt,
+    completed_count: p.completedCount || 0,
+    total_count: p.totalCount || 0
+  }));
+}
+
+function buildTaskRows() {
+  const rows = [];
+  state.projects.forEach(p => {
+    p.tasks.forEach((t, i) => {
+      rows.push({
+        id: t.id,
+        project_id: p.id,
+        user_id: currentUserId,
+        text: t.text,
+        completed: !!t.completed,
+        deadline: t.deadline || null,
+        completed_at: t.completedAt || null,
+        order_index: i,
+        repeat: t.repeat || null,
+        repeat_day: typeof t.repeatDay === 'number' ? t.repeatDay : null,
+        repeat_date: typeof t.repeatDate === 'number' ? t.repeatDate : null,
+        repeat_spawned_on: t.repeatSpawnedOn || null
+      });
+    });
+  });
+  return rows;
+}
+
 async function syncToSupabase() {
   if (!currentUserId) {
     console.warn('[sync] aborted — no currentUserId.');
@@ -202,54 +260,39 @@ async function syncToSupabase() {
   const today = todayISO();
 
   try {
-    const projectRows = state.projects.map((p, i) => ({
-      id: p.id,
-      user_id: currentUserId,
-      name: p.name,
-      color: p.color,
-      order_index: i,
-      target_date: p.targetDate || null,
-      buffer_date: p.bufferDate || null,
-      created_at: p.createdAt,
-      completed_count: p.completedCount || 0,
-      total_count: p.totalCount || 0
-    }));
+    const projectRows = buildProjectRows();
+    const taskRows = buildTaskRows();
 
-    const taskRows = [];
-    state.projects.forEach(p => {
-      p.tasks.forEach((t, i) => {
-        taskRows.push({
-          id: t.id,
-          project_id: p.id,
-          user_id: currentUserId,
-          text: t.text,
-          completed: !!t.completed,
-          deadline: t.deadline || null,
-          completed_at: t.completedAt || null,
-          order_index: i,
-          repeat: t.repeat || null,
-          repeat_day: typeof t.repeatDay === 'number' ? t.repeatDay : null,
-          repeat_date: typeof t.repeatDate === 'number' ? t.repeatDate : null,
-          repeat_spawned_on: t.repeatSpawnedOn || null
-        });
-      });
-    });
+    // Upsert only rows whose content changed since the last snapshot (a new id
+    // has no snapshot hash, so it counts as changed).
+    const changedProjects = projectRows.filter(r => dbSnapshot.projectHashes.get(r.id) !== rowHash(r));
+    const changedTasks = taskRows.filter(r => dbSnapshot.taskHashes.get(r.id) !== rowHash(r));
 
-    const curProjectIds = new Set(state.projects.map(p => p.id));
-    const curTaskIds = new Set(taskRows.map(t => t.id));
-    const delProjects = [...dbSnapshot.projectIds].filter(id => !curProjectIds.has(id));
-    const delTasks = [...dbSnapshot.taskIds].filter(id => !curTaskIds.has(id));
+    const curProjectIds = new Set(projectRows.map(r => r.id));
+    const curTaskIds = new Set(taskRows.map(r => r.id));
+    const delProjects = [...dbSnapshot.projectHashes.keys()].filter(id => !curProjectIds.has(id));
+    const delTasks = [...dbSnapshot.taskHashes.keys()].filter(id => !curTaskIds.has(id));
+
+    // Only rewrite today_tasks when the day's list actually changed. This is
+    // also FK-safe: any task in delTasks that was in today's list would have
+    // been removed from state.todayTasks too, which changes the signature — so
+    // todayChanged is true whenever a referenced row needs clearing first.
+    const todaySig = todayTasksSignature(today);
+    const todayChanged = todaySig !== dbSnapshot.todaySig;
 
     // Clear today's today_tasks first so deleting tasks can't trip a FK.
-    let res = await supabaseClient.from('today_tasks').delete().eq('user_id', currentUserId).eq('date', today);
-    if (res.error) throw res.error;
-
-    if (projectRows.length) {
-      res = await supabaseClient.from('projects').upsert(projectRows);
+    let res;
+    if (todayChanged) {
+      res = await supabaseClient.from('today_tasks').delete().eq('user_id', currentUserId).eq('date', today);
       if (res.error) throw res.error;
     }
-    if (taskRows.length) {
-      res = await supabaseClient.from('tasks').upsert(taskRows);
+
+    if (changedProjects.length) {
+      res = await supabaseClient.from('projects').upsert(changedProjects);
+      if (res.error) throw res.error;
+    }
+    if (changedTasks.length) {
+      res = await supabaseClient.from('tasks').upsert(changedTasks);
       if (res.error) throw res.error;
     }
     if (delTasks.length) {
@@ -260,7 +303,7 @@ async function syncToSupabase() {
       res = await supabaseClient.from('projects').delete().in('id', delProjects);
       if (res.error) throw res.error;
     }
-    if (state.todayTasks.length) {
+    if (todayChanged && state.todayTasks.length) {
       const rows = state.todayTasks.map(taskId => ({
         user_id: currentUserId,
         date: today,
@@ -270,8 +313,9 @@ async function syncToSupabase() {
       if (res.error) throw res.error;
     }
 
-    dbSnapshot.projectIds = curProjectIds;
-    dbSnapshot.taskIds = curTaskIds;
+    dbSnapshot.projectHashes = new Map(projectRows.map(r => [r.id, rowHash(r)]));
+    dbSnapshot.taskHashes = new Map(taskRows.map(r => [r.id, rowHash(r)]));
+    dbSnapshot.todaySig = todaySig;
   } catch (e) {
     // Log the full Supabase error (message / details / hint / code); an RLS
     // rejection surfaces here as code "42501".
@@ -471,10 +515,28 @@ function showToast(text) {
 }
 
 // ---------- Pomodoro session stats ----------
+// phiSessions grouped by projectId, built once and reused. A single render pass
+// asks for a project's sessions several times (time stats, today total, heatmap)
+// across every project, so grouping up front avoids re-scanning the whole array
+// each time. Invalidated whenever phiSessions changes (load + new session).
+let _sessionsByProject = null;
+function sessionsByProject() {
+  if (_sessionsByProject) return _sessionsByProject;
+  const map = new Map();
+  for (const s of phiSessions) {
+    let arr = map.get(s.projectId);
+    if (!arr) { arr = []; map.set(s.projectId, arr); }
+    arr.push(s);
+  }
+  _sessionsByProject = map;
+  return map;
+}
+function invalidateSessionsCache() { _sessionsByProject = null; }
+
 // All sessions belonging to a project. Shared by the time stats, today total,
 // and heatmap.
 function projectSessions(project) {
-  return phiSessions.filter(s => s.projectId === project.id);
+  return sessionsByProject().get(project.id) || [];
 }
 
 function projectTimeStats(project) {
@@ -544,6 +606,7 @@ function recordPomoSession(taskId, minutes, startTime) {
     minutes: minutes
   };
   phiSessions.push(session);
+  invalidateSessionsCache();
   insertSession(session);
 }
 
