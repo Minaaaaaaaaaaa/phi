@@ -40,9 +40,9 @@ let pomo = {
 };
 
 let phiSessions = []; // global flat array of completed pomodoro sessions
-let weekOffset = 0;   // 0 = current week, -1 = previous, +1 = next
-let dayStartHour = 0; // first hour shown at the top of the calendar grid (00:00)
-let activeTab = 'today'; // 'today' | 'projects' | 'weekly'; restored on load
+let phiCompletions = []; // task-completion marks, for the Monthly "✓" session bars
+let monthCursor = null; // Date at the 1st of the month shown in Monthly view (lazy-init)
+let activeTab = 'today'; // 'today' | 'projects' | 'monthly'; restored on load
 
 let sheetState = {
   newProject: { subtasks: [], editingId: null, dateRef: { deadline: '', repeat: null, repeatDay: null, repeatDate: null } }
@@ -56,11 +56,10 @@ function loadUIPrefs() {
     pomo.workMinutes = mins;
     pomo.remaining = pomo.workMinutes * 60;
   }
-  const ds = parseInt(localStorage.getItem('weeklyDayStart'), 10);
-  if (!isNaN(ds)) dayStartHour = ds;
   // Guard against a stale/unknown value leaving every view inactive.
-  const tab = localStorage.getItem('activeTab');
-  if (tab === 'today' || tab === 'projects' || tab === 'weekly') activeTab = tab;
+  let tab = localStorage.getItem('activeTab');
+  if (tab === 'weekly') tab = 'monthly'; // migrate the old tab name
+  if (tab === 'today' || tab === 'projects' || tab === 'monthly') activeTab = tab;
 }
 
 function saveUIPrefs() {
@@ -163,6 +162,22 @@ async function loadFromSupabase() {
     minutes: s.minutes
   }));
   invalidateSessionsCache();
+
+  // Task-completion marks (drive the Monthly "✓" session bars)
+  const { data: completionRows, error: cErr } = await supabaseClient.from('task_completions')
+    .select('*')
+    .eq('user_id', currentUserId);
+  if (cErr) throw cErr;
+  phiCompletions = (completionRows || []).map(c => ({
+    id: c.id,
+    taskId: c.task_id,
+    taskName: c.task_name,
+    projectId: c.project_id,
+    projectName: c.project_name,
+    projectColor: c.project_color,
+    date: c.date,
+    completed: c.completed
+  }));
 
   // Snapshot the current rows so syncs can compute both changes and deletions.
   // Built with the same helpers the sync uses, so hashes line up and an
@@ -353,6 +368,30 @@ async function insertSession(s) {
   }
 }
 
+// Persist a task's completion mark for today. Upserts on (user_id, task_id,
+// date) so check -> completed:true and un-check -> completed:false both land on
+// the same row (the row is never deleted, so the session bar survives un-check).
+async function persistCompletion(c) {
+  if (!currentUserId) return;
+  try {
+    const { error } = await supabaseClient.from('task_completions').upsert({
+      user_id: currentUserId,
+      task_id: c.taskId,
+      task_name: c.taskName,
+      project_id: c.projectId,
+      project_name: c.projectName,
+      project_color: c.projectColor,
+      date: c.date,
+      completed: c.completed
+    }, { onConflict: 'user_id,task_id,date' });
+    if (error) throw error;
+  } catch (e) {
+    console.error('[persistCompletion] failed:', e, '| message:', e && e.message,
+      '| details:', e && e.details, '| hint:', e && e.hint, '| code:', e && e.code);
+    showToast('저장 중 오류가 발생했어요. 다시 시도해주세요.');
+  }
+}
+
 // ---------- Helpers ----------
 function uid() {
   // Prefer a real UUID so ids are compatible with uuid/text columns in Supabase.
@@ -388,6 +427,20 @@ function fmtDeadline(iso) {
   if (days < 0) return `${-days}일 지남`;
   if (days < 7) return `${days}일 남음`;
   return fmtKoreanShortDate(d);
+}
+
+// Date -> "N월 N일". Canonical short-date formatter (see fmtKoreanMonthDay).
+function fmtKoreanShortDate(d) {
+  return (d.getMonth() + 1) + '월 ' + d.getDate() + '일';
+}
+
+// Minute count -> "<prefix> N분" / "<prefix> N시간 [N분]". Used by the project
+// cards' focus-time pill.
+function fmtMinutesKorean(prefix, totalMin) {
+  if (totalMin < 60) return `${prefix} ${totalMin}분`;
+  const h = Math.floor(totalMin / 60);
+  const m = totalMin % 60;
+  return m === 0 ? `${prefix} ${h}시간` : `${prefix} ${h}시간 ${m}분`;
 }
 
 // True when a deadline is in the past (rendered in red on task rows).
@@ -608,6 +661,31 @@ function recordPomoSession(taskId, minutes, startTime) {
   phiSessions.push(session);
   invalidateSessionsCache();
   insertSession(session);
+}
+
+// Set today's completion mark for a task (check -> true, un-check -> false).
+// `found` is { project, task }. The row is kept either way so the Monthly
+// session bar survives an un-check; only the "✓" prefix (completed flag) changes.
+function upsertCompletion(found, completed) {
+  const today = todayISO();
+  const taskId = found.task.id;
+  let c = phiCompletions.find(x => x.taskId === taskId && x.date === today);
+  if (c) {
+    c.completed = completed;
+  } else {
+    c = {
+      id: uid(),
+      taskId: taskId,
+      taskName: found.task.text,
+      projectId: found.project.id,
+      projectName: found.project.name,
+      projectColor: found.project.color,
+      date: today,
+      completed: completed
+    };
+    phiCompletions.push(c);
+  }
+  persistCompletion(c);
 }
 
 // ---------- Daily cleanup: drop completed sub-tasks ----------
@@ -1081,12 +1159,17 @@ function toggleTask(taskId) {
   if (becameComplete) {
     // Cumulative counter only ever grows; un-checking does not decrement it.
     found.project.completedCount = (found.project.completedCount || 0) + 1;
+    // Mark today's completion (drives the Monthly bar + its "✓" prefix).
+    upsertCompletion(found, true);
     const tasks = found.project.tasks;
     const idx = tasks.indexOf(found.task);
     if (idx >= 0 && idx < tasks.length - 1) {
       tasks.splice(idx, 1);
       tasks.push(found.task);
     }
+  } else {
+    // Un-check keeps the bar but clears the "✓" prefix (completed:false).
+    upsertCompletion(found, false);
   }
 
   save();
@@ -1136,189 +1219,132 @@ function deleteProject(projectId) {
   renderProjects();
 }
 
-// ---------- Weekly view ----------
-const KOR_DAYS_SHORT = ['월', '화', '수', '목', '금', '토', '일'];
-const HOURS_VISIBLE = 24; // grid covers 24 hours from dayStartHour (00:00 → next 00:00)
+// ---------- Monthly view ----------
+const MONTH_WEEKDAYS = ['MON', 'TUE', 'WED', 'THU', 'FRI', 'SAT', 'SUN']; // grid starts on Monday
 
-function getWeekDates(offset) {
-  const today = startOfDay(new Date());
-  const dow = today.getDay(); // 0=Sun..6=Sat
-  const mondayIdx = (dow + 6) % 7; // 0=Mon..6=Sun
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - mondayIdx + (offset * 7));
-  const days = [];
-  for (let i = 0; i < 7; i++) {
-    const d = new Date(monday);
-    d.setDate(monday.getDate() + i);
-    days.push(d);
+// Focus-duration label per PLAN: under an hour -> "(30m)", an hour or more ->
+// "(1h)" / "(1h 35m)".
+function fmtSessionDuration(min) {
+  if (min < 60) return `(${min}m)`;
+  const h = Math.floor(min / 60);
+  const m = min % 60;
+  return m === 0 ? `(${h}h)` : `(${h}h ${m}m)`;
+}
+
+// Calendar bar background: the project color at the given opacity.
+// Form 1 (pomodoro) uses 0.5; form 2 (task completion) uses 0.7.
+function barBg(hex, opacity) {
+  const { r, g, b } = hexToRgb(hex);
+  return `rgba(${r}, ${g}, ${b}, ${opacity})`;
+}
+
+// Readable text color for a bar: composite the color at `opacity` over the
+// white cell, then pick dark or white by YIQ luminance.
+function barTextColor(hex, opacity) {
+  const { r, g, b } = hexToRgb(hex);
+  const w = 255 * (1 - opacity);
+  const R = r * opacity + w, G = g * opacity + w, B = b * opacity + w;
+  const yiq = (R * 299 + G * 587 + B * 114) / 1000;
+  return yiq >= 150 ? '#1f2937' : '#ffffff';
+}
+
+function renderMonthly() {
+  if (!monthCursor) {
+    const now = new Date();
+    monthCursor = new Date(now.getFullYear(), now.getMonth(), 1);
   }
-  return days;
-}
+  const year = monthCursor.getFullYear();
+  const month = monthCursor.getMonth(); // 0-11
 
-function fmtKoreanShortDate(d) {
-  return (d.getMonth() + 1) + '월 ' + d.getDate() + '일';
-}
+  const title = document.getElementById('month-title');
+  if (title) {
+    title.textContent = monthCursor.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+  }
 
-// Korean minute/hour label with a prefix, e.g. "평균" or "총":
-// under 60 → "NN분", exactly 60 → "1시간", over 60 → "1시간 NN분"
-function fmtMinutesKorean(prefix, totalMin) {
-  if (totalMin < 60) return `${prefix} ${totalMin}분`;
-  const h = Math.floor(totalMin / 60);
-  const m = totalMin % 60;
-  return m === 0 ? `${prefix} ${h}시간` : `${prefix} ${h}시간 ${m}분`;
-}
+  const weekdaysEl = document.getElementById('month-weekdays');
+  if (weekdaysEl) {
+    weekdaysEl.innerHTML = MONTH_WEEKDAYS
+      .map(w => `<div class="month-wd">${w}</div>`).join('');
+  }
 
-function saveDayStart() {
-  localStorage.setItem('weeklyDayStart', String(dayStartHour));
-}
+  const grid = document.getElementById('month-grid');
+  if (!grid) return;
 
-function startOffsetForTime(hour, minute) {
-  // Returns the y-pixel offset (1px = 1min) from the top of the grid for a given clock time.
-  let offset = (hour * 60 + minute) - (dayStartHour * 60);
-  if (offset < 0) offset += 24 * 60;
-  return offset;
-}
-
-function renderWeekly() {
-  const days = getWeekDates(weekOffset);
-  const dayISOs = days.map(dateISOFromDate);
+  // Monday-based column index: Sun(0)->6, Mon(1)->0, ... Sat(6)->5.
+  const startWeekday = (new Date(year, month, 1).getDay() + 6) % 7;
+  const daysInMonth  = new Date(year, month + 1, 0).getDate();
+  const daysInPrev   = new Date(year, month, 0).getDate();
+  // 5 or 6 rows depending on how the month falls across weeks.
+  const totalCells = Math.ceil((startWeekday + daysInMonth) / 7) * 7;
   const todayISOStr = todayISO();
 
-  // Header range
-  document.getElementById('weekly-range').textContent =
-    fmtKoreanShortDate(days[0]) + ' — ' + fmtKoreanShortDate(days[6]);
-
-  // Day-start pills
-  document.querySelectorAll('#cal-start-pills button').forEach(btn => {
-    btn.classList.toggle('active', parseInt(btn.dataset.start) === dayStartHour);
-  });
-
-  // Day header
-  const header = document.getElementById('cal-day-header');
-  header.innerHTML = '<div class="cal-day-header-spacer"></div>' +
-    days.map((d, i) => {
-      const isToday = dateISOFromDate(d) === todayISOStr;
-      return `<div class="cal-day-head${isToday ? ' today' : ''}">
-        ${KOR_DAYS_SHORT[i]}
-        <div class="cal-day-num">${d.getDate()}</div>
-      </div>`;
-    }).join('');
-
-  // Body
-  const body = document.getElementById('cal-body');
-  body.innerHTML = '';
-
-  // Time axis column (24 labels: dayStartHour ... dayStartHour-1 next day)
-  const timeCol = document.createElement('div');
-  timeCol.className = 'cal-time-col';
-  for (let h = 0; h <= HOURS_VISIBLE; h++) {
-    // Hide the 00:00 label at the very top (h=0) and very bottom (h=24).
-    if (h === 0 || h === HOURS_VISIBLE) continue;
-    const hour = (dayStartHour + h) % 24;
-    const lbl = document.createElement('div');
-    lbl.className = 'cal-time-label';
-    lbl.textContent = pad(hour) + ':00';
-    lbl.style.top = (h * 60) + 'px';
-    timeCol.appendChild(lbl);
-  }
-  body.appendChild(timeCol);
-
-  // 7 day columns
-  const dayCols = [];
-  days.forEach((d, i) => {
-    const col = document.createElement('div');
-    col.className = 'cal-day-col' + (dateISOFromDate(d) === todayISOStr ? ' today' : '');
-    body.appendChild(col);
-    dayCols.push(col);
-  });
-
-  // Horizontal hour guide lines (spanning all day cols)
-  for (let h = 1; h < HOURS_VISIBLE; h++) {
-    const line = document.createElement('div');
-    line.className = 'cal-hour-line';
-    line.style.top = (h * 60) + 'px';
-    body.appendChild(line);
-  }
-
-  // Sessions
-  const weekSessions = phiSessions.filter(s => dayISOs.includes(s.date));
-  for (const s of weekSessions) {
-    const colIdx = dayISOs.indexOf(s.date);
-    if (colIdx < 0) continue;
-    const parts = String(s.startTime || '0:0').split(':');
-    const sh = parseInt(parts[0]) || 0;
-    const sm = parseInt(parts[1]) || 0;
-    const topOffset = startOffsetForTime(sh, sm);
-    if (topOffset < 0 || topOffset >= HOURS_VISIBLE * 60) continue;
-
-    const height = Math.max(8, s.minutes);
-    const showName = s.minutes >= 25;
-    const block = document.createElement('div');
-    block.className = 'cal-session' + (showName ? '' : ' tiny');
-    block.style.background = s.projectColor || PALETTE[0];
-    block.style.top = topOffset + 'px';
-    block.style.height = height + 'px';
-    block.dataset.sessionId = s.id;
-
-    if (showName) {
-      block.innerHTML = `<div class="cal-session-name">${escapeHtml(s.projectName)}</div>`;
-    }
-
-    block.addEventListener('click', (e) => {
-      e.stopPropagation();
-      showSessionTooltip(s);
+  // One bar per (date, task). A bar exists if the task had a pomodoro OR a
+  // completion mark that day. Minutes come from pomodoros (sum); the "✓" prefix
+  // from the completion mark's current `completed` flag.
+  const barsByDate = {};
+  const barFor = (date, key) => {
+    const byTask = barsByDate[date] || (barsByDate[date] = {});
+    return byTask[key] || (byTask[key] = {
+      taskName: '', projectColor: PALETTE[0], minutes: 0, completed: false
     });
-
-    dayCols[colIdx].appendChild(block);
+  };
+  for (const s of phiSessions) {
+    const bar = barFor(s.date, s.taskId || s.taskName || '');
+    bar.minutes += (s.minutes || 0);
+    if (s.taskName) bar.taskName = s.taskName;
+    if (s.projectColor) bar.projectColor = s.projectColor;
+  }
+  for (const c of phiCompletions) {
+    const bar = barFor(c.date, c.taskId || c.taskName || '');
+    if (c.taskName) bar.taskName = c.taskName;
+    if (c.projectColor) bar.projectColor = c.projectColor;
+    bar.completed = !!c.completed; // current check state -> "✓" prefix
   }
 
-  // Now indicator (current week only)
-  if (weekOffset === 0) {
-    const now = new Date();
-    const nowOffset = startOffsetForTime(now.getHours(), now.getMinutes());
-    if (nowOffset >= 0 && nowOffset < HOURS_VISIBLE * 60) {
-      const nowLine = document.createElement('div');
-      nowLine.className = 'cal-now-line';
-      nowLine.style.top = nowOffset + 'px';
-      body.appendChild(nowLine);
+  let html = '';
+  for (let i = 0; i < totalCells; i++) {
+    const dayNum = i - startWeekday + 1;
+    let cellDate, inMonth;
+    if (dayNum < 1) {
+      cellDate = new Date(year, month - 1, daysInPrev + dayNum);
+      inMonth = false;
+    } else if (dayNum > daysInMonth) {
+      cellDate = new Date(year, month + 1, dayNum - daysInMonth);
+      inMonth = false;
+    } else {
+      cellDate = new Date(year, month, dayNum);
+      inMonth = true;
     }
+    const iso = dateISOFromDate(cellDate);
+    const cls = ['month-cell'];
+    if (!inMonth) cls.push('other-month');
+    if (iso === todayISOStr) cls.push('today');
+    // The 1st of any month shown in the grid gets a 3-letter month prefix
+    // (e.g. "Aug 1"); every other day shows just the number.
+    const dayOfMonth = cellDate.getDate();
+    const dayLabel = dayOfMonth === 1
+      ? cellDate.toLocaleDateString('en-US', { month: 'short' }) + ' 1'
+      : String(dayOfMonth);
+    // Session bars: project color at 50% opacity, task text only (CSS ellipsis
+    // clips to the cell). The "✓" prefix follows the task's current check state.
+    // The click toast shows the full name + accumulated pomodoro time.
+    const dayBars = barsByDate[iso] ? Object.values(barsByDate[iso]) : [];
+    const eventsHtml = dayBars.map(b => {
+      const color = b.projectColor;
+      const name = b.taskName;
+      const full = b.minutes > 0 ? `${name} ${fmtSessionDuration(b.minutes)}` : name;
+      // Completed tasks get a "✓ " prefix.
+      const label = b.completed ? '✓ ' + name : name;
+      return `<div class="month-event" style="background:${barBg(color, 0.5)};color:${barTextColor(color, 0.5)}" data-full="${escapeHtml(full)}">`
+        + `${escapeHtml(label)}`
+        + `</div>`;
+    }).join('');
+    html += `<div class="${cls.join(' ')}" data-date="${iso}">`
+      + `<div class="month-daynum">${dayLabel}</div>`
+      + `<div class="month-events">${eventsHtml}</div>`
+      + `</div>`;
   }
-
-  // Empty state (summary bar removed)
-  if (weekSessions.length === 0) {
-    const empty = document.createElement('div');
-    empty.className = 'cal-empty';
-    empty.innerHTML = '아직 집중 기록이 없어요.<br>포모도로를 완료하면 여기에 쌓여요.';
-    body.appendChild(empty);
-  }
-
-  // Auto-scroll: position the focus time in the middle of the viewport
-  requestAnimationFrame(scrollWeeklyToFocus);
-}
-
-function scrollWeeklyToFocus() {
-  const body = document.getElementById('cal-body');
-  if (!body) return;
-  // Position 09:00 in the center of the visible area.
-  const targetMinute = 9 * 60;
-  let offset = startOffsetForTime(Math.floor(targetMinute / 60), targetMinute % 60);
-  if (offset < 0) offset = 0;
-  if (offset > HOURS_VISIBLE * 60) offset = HOURS_VISIBLE * 60;
-
-  // The document body is the scroller now, so scroll the window to center the
-  // target time. cal-body's document-relative top + the in-grid offset, minus
-  // half the viewport, lands 09:00 in the middle.
-  const bodyTopInDoc = body.getBoundingClientRect().top + window.scrollY;
-  const target = bodyTopInDoc + offset - window.innerHeight / 2;
-  window.scrollTo(0, Math.max(0, target));
-}
-
-function showSessionTooltip(s) {
-  const tip = document.getElementById('session-tooltip');
-  tip.innerHTML =
-    `<strong>${escapeHtml(s.projectName)}</strong> — ${escapeHtml(s.taskName)}<br>` +
-    `${escapeHtml(s.startTime)} ~ ${escapeHtml(s.endTime)} (${s.minutes}분)`;
-  tip.classList.add('show');
+  grid.innerHTML = html;
 }
 
 // ---------- Pomodoro ----------
@@ -1428,8 +1454,8 @@ function completePomoPhase() {
     pomo.remaining = POMO_BREAK;
     renderPomo();
     renderProjects();
-    if (document.getElementById('weekly-view').classList.contains('active')) {
-      renderWeekly();
+    if (document.getElementById('monthly-view').classList.contains('active')) {
+      renderMonthly();
     }
   } else {
     pomo.mode = 'work';
@@ -1482,7 +1508,7 @@ function applyTabClasses(name) {
   document.querySelectorAll('.tab-btn, .top-nav-links a').forEach(b => b.classList.toggle('active', b.dataset.tab === name));
   document.getElementById('today-view').classList.toggle('active', name === 'today');
   document.getElementById('projects-view').classList.toggle('active', name === 'projects');
-  document.getElementById('weekly-view').classList.toggle('active', name === 'weekly');
+  document.getElementById('monthly-view').classList.toggle('active', name === 'monthly');
 }
 
 function switchTab(name) {
@@ -1490,12 +1516,10 @@ function switchTab(name) {
   localStorage.setItem('activeTab', name);
   applyTabClasses(name);
   // The document body is the scroller; reset it on tab change so each tab opens
-  // at the top. Weekly manages its own scroll position via renderWeekly().
-  if (name === 'weekly') renderWeekly();
+  // at the top.
+  if (name === 'monthly') renderMonthly();
   else window.scrollTo(0, 0);
   renderPomo();
-  // hide any open session tooltip on tab change
-  document.getElementById('session-tooltip').classList.remove('show');
 }
 
 // ---------- Bottom sheets ----------
@@ -2048,7 +2072,7 @@ async function startApp() {
     renderToday();
     renderProjects();
     // Restore the tab the user was last on. switchTab() covers renderPomo() and,
-    // for weekly, renderWeekly().
+    // for monthly, renderMonthly().
     switchTab(activeTab);
   } finally {
     // Lift the boot overlay only once the right tab is rendered, so it never
@@ -2099,32 +2123,22 @@ function init() {
   document.getElementById('pomo-minus').addEventListener('click', () => adjustPomoDuration(-5));
   document.getElementById('pomo-plus').addEventListener('click', () => adjustPomoDuration(5));
 
-  document.querySelectorAll('[data-week-nav]').forEach(el => {
+  document.querySelectorAll('[data-month-nav]').forEach(el => {
     el.addEventListener('click', () => {
-      weekOffset += parseInt(el.dataset.weekNav);
-      renderWeekly();
-    });
-  });
-
-  document.querySelectorAll('#cal-start-pills button').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const v = parseInt(btn.dataset.start);
-      if (isNaN(v)) return;
-      dayStartHour = v;
-      saveDayStart();
-      renderWeekly();
-    });
-  });
-
-  // Re-render weekly when crossing the breakpoint so session-block thresholds update
-  let resizeTimer = null;
-  window.addEventListener('resize', () => {
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(() => {
-      if (document.getElementById('weekly-view').classList.contains('active')) {
-        renderWeekly();
+      if (!monthCursor) {
+        const now = new Date();
+        monthCursor = new Date(now.getFullYear(), now.getMonth(), 1);
       }
-    }, 200);
+      monthCursor.setMonth(monthCursor.getMonth() + parseInt(el.dataset.monthNav, 10));
+      renderMonthly();
+    });
+  });
+
+  // Tapping a session bar shows its full task name + accumulated time. Delegated
+  // on the static grid so it survives every renderMonthly() innerHTML rebuild.
+  document.getElementById('month-grid').addEventListener('click', (e) => {
+    const ev = e.target.closest('.month-event');
+    if (ev && ev.dataset.full) showToast(ev.dataset.full);
   });
 
   // When the tab regains focus, immediately reconcile the timer with the wall
@@ -2134,13 +2148,6 @@ function init() {
     if (document.hidden) return;
     if (pomo.running && pomo.startedAt != null) {
       tickPomo();
-    }
-  });
-
-  // Dismiss session tooltip on outside tap
-  document.addEventListener('click', (e) => {
-    if (!e.target.closest('.cal-session') && !e.target.closest('.session-tooltip')) {
-      document.getElementById('session-tooltip').classList.remove('show');
     }
   });
 

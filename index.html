@@ -15,7 +15,8 @@
     var tab = 'today';
     try {
       var saved = localStorage.getItem('activeTab');
-      if (saved === 'today' || saved === 'projects' || saved === 'weekly') tab = saved;
+      if (saved === 'weekly') saved = 'monthly'; // migrate the old tab name
+      if (saved === 'today' || saved === 'projects' || saved === 'monthly') tab = saved;
     } catch (e) {
       // Storage unavailable (private mode, blocked cookies) -- keep the default.
     }
@@ -48,7 +49,7 @@
     <div class="top-nav-links">
       <a data-tab="today" class="active">오늘</a>
       <a data-tab="projects">프로젝트</a>
-      <a data-tab="weekly">위클리</a>
+      <a data-tab="monthly">먼슬리</a>
     </div>
   </div>
 </nav>
@@ -79,31 +80,19 @@
     <div id="projects-content"></div>
   </div>
 
-  <!-- Weekly view -->
-  <div class="view" id="weekly-view">
-    <div class="cal-header">
-      <button class="weekly-nav" data-week-nav="-1" aria-label="Previous week">‹</button>
-      <div class="cal-range" id="weekly-range"></div>
-      <button class="weekly-nav" data-week-nav="1" aria-label="Next week">›</button>
-    </div>
-
-    <div class="cal-settings">
-      <span class="cal-settings-label">하루 시작</span>
-      <div class="cal-start-pills" id="cal-start-pills">
-        <button data-start="0" class="active">0시</button>
-        <button data-start="4">4시</button>
-        <button data-start="5">5시</button>
-        <button data-start="6">6시</button>
-        <button data-start="7">7시</button>
-        <button data-start="8">8시</button>
+  <!-- Monthly view (Google Calendar-style grid) -->
+  <div class="view" id="monthly-view">
+    <div class="month-header">
+      <h1 class="header-title" id="month-title"></h1>
+      <div class="month-nav-group">
+        <button class="month-nav" data-month-nav="-1" aria-label="Previous month">‹</button>
+        <button class="month-nav" data-month-nav="1" aria-label="Next month">›</button>
       </div>
     </div>
-
-    <div class="cal-sticky-top">
-      <div class="cal-day-header" id="cal-day-header"></div>
+    <div class="month-card">
+      <div class="month-weekdays" id="month-weekdays"></div>
+      <div class="month-grid" id="month-grid"></div>
     </div>
-
-    <div class="cal-body" id="cal-body"></div>
   </div>
 
   <!-- Pomodoro (only visible on Today) -->
@@ -124,7 +113,7 @@
   <div class="tab-bar">
     <button class="tab-btn active" data-tab="today">Today</button>
     <button class="tab-btn" data-tab="projects">Projects</button>
-    <button class="tab-btn" data-tab="weekly">Weekly</button>
+    <button class="tab-btn" data-tab="monthly">Monthly</button>
   </div>
 </div>
 
@@ -133,9 +122,6 @@
   <div class="color-picker-title">프로젝트 색상 변경</div>
   <div class="color-swatches" id="color-swatches"></div>
 </div>
-
-<!-- Session detail popup -->
-<div class="session-tooltip" id="session-tooltip"></div>
 
 <!-- Toast -->
 <div class="toast" id="toast"></div>

@@ -36,65 +36,82 @@
 ### 탭 구조 (현재)
 1. **Today** — 오늘 할 일 + 뽀모도로 타이머
 2. **Projects** — 프로젝트 & sub-task 관리
-3. **Weekly** — 주 단위 캘린더 뷰
+3. **Monthly** — 월간 캘린더 뷰 (Phase 1에서 Weekly → Monthly로 교체)
 
 ---
 
 ## 🛣 Roadmap
 
-### Phase 1 — Weekly → Monthly View 변경 ⏭ 진행 예정
+### Phase 1 — Weekly → Monthly View 변경 ✅ 구현 완료 (실환경 검증 + 커밋 정리만 남음)
 
 **목표:** Weekly view를 완전히 삭제하고, Google Calendar 스타일의 Monthly view로 재구축
 
-**작업 범위:**
+> 구현 과정에서 초기 스펙이 여러 번 갱신됨. 아래는 **최종 확정 사양** 기준.
+> 주요 변경: 요일 `일~토` → `MON~SUN`(월요일 시작), 배경 `white 20% overlay` → `project색 opacity 50%`,
+> 형태1·형태2 → **단일 세션바로 통합**, 완료 표시 `취소선` → `✓ 접두사`.
 
 #### 탭 & 라우팅
-- [ ] 탭 라벨 `weekly` → `monthly` 변경 (3곳: top-nav, tab-bar, view id)
-- [ ] 날짜 네비게이션 (`data-week-nav` → `data-month-nav`)
-- [ ] localStorage의 `activeTab` 값 마이그레이션 (`weekly` → `monthly`)
+- [x] 탭 라벨 `weekly` → `monthly` (top-nav "먼슬리", tab-bar "Monthly", view id `monthly-view`)
+- [x] 날짜 네비게이션 `data-week-nav` → `data-month-nav`
+- [x] localStorage `activeTab` 마이그레이션 (`weekly` → `monthly`)
 
-#### UI 재구축 (기존 Weekly UI는 전면 삭제)
-- [ ] 기존 `.cal-*` 관련 마크업/스타일/로직 전부 제거
-- [ ] Google Calendar 스타일의 월간 그리드 UI 새로 구축
-  - 7열 × 5~6행 그리드 (일~토)
-  - 요일 헤더 상단 고정
-  - 이전달/다음달 날짜는 회색 처리
-  - 오늘 날짜는 강조 표시
-- [ ] 하루 시작 시간 pill UI는 삭제 (Monthly view에는 불필요)
+#### UI 재구축 (기존 Weekly UI 전면 삭제)
+- [x] weekly 전용 `.cal-*` 마크업/스타일/로직 제거 (subtask 마감일 팝업 `.cal-*`는 **보존**)
+- [x] 하루 시작 시간 pill UI 삭제
+- [x] Google Calendar 스타일 월간 그리드
+  - [x] 7열 × 5~6행, **MON~SUN (월요일 시작)**
+  - [x] 요일 헤더 (카드 상단, 요일 사이 세로 구분선 / 헤더-그리드 사이 가로선 없음)
+  - [x] 이전달/다음달 날짜 회색 처리
+  - [x] 오늘 날짜 강조 (보라 원형)
+  - [x] 흰색 카드 UI (border-radius + subtle shadow, 셀 사이 1px 격자선)
+  - [x] 각 달 1일에 영문 약자 접두 ("Aug 1")
 
-#### 뽀모도로 세션 표시
-- [ ] 뽀모도로 세션 완료 시 해당 날짜 칸에 자동 표시
-- [ ] task 완료(check) 시 별도 상태로 표시
+#### 세션바 (형태1 뽀모 + 형태2 완료 → 단일 바로 통합)
+- [x] **생성 조건:** 뽀모도로 완료 **또는** task check 완료 (한 task = 하루 세션바 1개)
+- [x] 배경: 해당 task의 project 색상 + **opacity 50%** (YIQ 기반 자동 텍스트 대비)
+- [x] 텍스트: task 내용만, 셀 너비 기준 CSS ellipsis 자동 처리
+- [x] **완료 표시: 텍스트 앞 `✓ ` 접두사** (취소선 아님) — check 상태에 따라 토글
+- [x] 같은 날 여러 세션바 세로 스택 (Google Calendar 이벤트 스타일)
+- [x] **toast (바 클릭):** 전체 task명 + 누적 뽀모도로 시간 노출
+  - 시간 표기: 5~55분 `(30m)` / 60분+ `(1h)`·`(1h 35m)`
 
-**표시 형태 1 — task 뽀모도로 완료 시:**
-- 배경 색상: 해당 task가 속한 project 색상 + white opacity 20% overlay
-- 네모 안 텍스트: task 내용 (프로젝트 이름 아님)
-- task 이름 옆에 집중 시간 표기
-
-**표시 형태 2 — task check 완료 시:**
-- 배경 색상: 해당 task가 속한 project 색상 + white opacity 20% overlay
-- 네모 안 텍스트: task 내용 (프로젝트 이름 아님)
-- 텍스트 위에 취소선(strikethrough) 표시
-
-**공통 규칙:**
-- **시간 표기:**
-  - 5분 ~ 55분: `(30m)`, `(45m)` 형식
-  - 60분 이상: `(1h)`, `(1h 35m)` 형식
-- 같은 날짜에 여러 세션이 있으면 세로로 쌓아서 표시
-- 형태는 Google Calendar 이벤트 스타일 (가로로 긴 네모)
+#### 상태 변경 / task 삭제 규칙
+- [x] **uncheck:** 세션바 유지, `✓ `만 제거 (`task_completions.completed=false`로 upsert, 행 유지)
+- [x] **뽀모도로 재실행:** 세션바 유지, 누적 시간만 반영
+- [x] **task 삭제 시** (세션바는 task가 아닌 기록 기반이라 유지됨)
+  - [x] 뽀모도로 시행 후 삭제 → 세션바 + 누적 시간 유지
+  - [x] check 완료 후 삭제 → 세션바(`✓`) 유지
+  - [x] 뽀모도 check도 안 한 상태 삭제 → 세션바 없음
 
 #### 데이터 연동
-- [ ] 뽀모도로 완료 시 Supabase에 세션 저장
-  - task_id, project_id, duration, completed_at
-- [ ] Monthly view 로드 시 해당 월의 세션 조회 및 렌더링
+- [x] 뽀모도로 완료 → `pomodoro_sessions` 저장 (기존)
+- [x] task check 완료 → `task_completions` 저장 (**신규 테이블**, `completed` 플래그 + `unique(user_id, task_id, date)` upsert)
+- [x] Monthly 로드 시 `pomodoro_sessions` + `task_completions` 조회 → (date, task) 단위 병합 렌더
+- [x] RLS 정책 적용
 
-**영향받는 파일:**
-- `index.html` — weekly view 관련 마크업 전면 교체
-- `style.css` — `.cal-*` 스타일 전면 재작성
-- `app.js` — 캘린더 렌더링 함수, 세션 표시 로직 신규 작성
+**DB 스키마 (확정):**
+```sql
+-- task_completions (신규, SQL 실행 완료)
+create table public.task_completions (
+  id uuid primary key default gen_random_uuid(),
+  user_id uuid not null references auth.users(id) on delete cascade,
+  task_id uuid not null,
+  task_name text not null,
+  project_id uuid, project_name text, project_color text,
+  date date not null,
+  completed boolean not null default true,
+  created_at timestamptz not null default now(),
+  unique (user_id, task_id, date)
+);
+```
 
-**참고 레퍼런스:**
-- Google Calendar 월간 뷰 (이벤트가 색상 바로 표시되는 방식)
+#### 남은 항목
+- [ ] 실환경(로그인 상태) 최종 검증 — Today·Projects·Monthly 세 탭, 형태2 저장/로드, 저장 오류 토스트 해소, subtask 마감일 팝업
+- [ ] Phase 1 변경분 커밋 정리 (`bd0c32a`에 `--amend`로 통합, 커밋 메시지에 형태2 포함 반영)
+
+**영향받은 파일:** `index.html`, `style.css`, `app.js` (+ Supabase `task_completions` 테이블)
+
+**참고 레퍼런스:** Google Calendar 월간 뷰
 
 ---
 
@@ -178,8 +195,12 @@ ALTER TABLE subtasks ADD COLUMN estimated_minutes INT;
 - Google OAuth 로그인 유지
 
 ### 확정 사항 (Phase 1)
-- Monthly view 세션 표시: Google Calendar 스타일 색상 바 (project 색상 + task 텍스트 + 집중 시간)
-- 시간 표기: 5~55분은 `(XXm)`, 60분 이상은 `(Xh)` 또는 `(Xh XXm)`
+- Monthly view 세션바: project색 **opacity 50%** 배경 + task 텍스트(ellipsis) + `✓ ` 완료 접두사
+- 세션바 = 한 task의 하루 1개 (뽀모 완료 **또는** check 완료 시 생성), 뽀모/완료 기록 기반이라 task 삭제 후에도 유지
+- 완료 표시는 취소선이 아니라 **`✓ ` 접두사** (uncheck 시 제거)
+- 시간(누적 뽀모)은 셀이 아니라 **toast(바 클릭)** 에만 표기: 5~55분 `(XXm)`, 60분+ `(Xh)`·`(Xh XXm)`
+- 요일 그리드는 **월요일 시작(MON~SUN)**
+- `task_completions` 테이블 신설 (`completed` 플래그 + `unique(user_id, task_id, date)` upsert)
 
 ### 검토 필요
 - 반복 task의 UX (Today에 어떻게 나타나는지)
@@ -190,4 +211,4 @@ ALTER TABLE subtasks ADD COLUMN estimated_minutes INT;
 
 ---
 
-*Last updated: 2025*
+*Last updated: 2026-08-03*
