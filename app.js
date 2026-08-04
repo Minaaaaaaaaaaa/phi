@@ -1466,6 +1466,12 @@ function completePomoPhase() {
 
 function startPomo() {
   if (pomo.running) return;
+  // A focus (work) session must be tied to a task, otherwise it records nothing
+  // and the time is lost. Break sessions don't need a task.
+  if (pomo.mode === 'work' && !pomo.taskId) {
+    showToast('먼저 집중할 task를 선택해주세요.');
+    return;
+  }
   pomo.running = true;
   if (pomo.mode === 'work' && !pomo.startTime) {
     pomo.startTime = clockHHMM();
