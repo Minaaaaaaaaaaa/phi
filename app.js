@@ -392,6 +392,25 @@ async function persistCompletion(c) {
   }
 }
 
+// Delete today's completion row for a task. Used when un-checking a task that
+// has no pomodoro that day: without a pomodoro the Monthly bar has no reason to
+// exist, so the row is removed rather than kept with completed:false.
+async function deleteCompletion(taskId, date) {
+  if (!currentUserId) return;
+  try {
+    const { error } = await supabaseClient.from('task_completions')
+      .delete()
+      .eq('user_id', currentUserId)
+      .eq('task_id', taskId)
+      .eq('date', date);
+    if (error) throw error;
+  } catch (e) {
+    console.error('[deleteCompletion] failed:', e, '| message:', e && e.message,
+      '| details:', e && e.details, '| hint:', e && e.hint, '| code:', e && e.code);
+    showToast('저장 중 오류가 발생했어요. 다시 시도해주세요.');
+  }
+}
+
 // ---------- Helpers ----------
 function uid() {
   // Prefer a real UUID so ids are compatible with uuid/text columns in Supabase.
@@ -669,6 +688,20 @@ function recordPomoSession(taskId, minutes, startTime) {
 function upsertCompletion(found, completed) {
   const today = todayISO();
   const taskId = found.task.id;
+
+  // Un-checking a task that had no pomodoro today: the bar only existed because
+  // of this completion mark, so drop the row entirely (in memory + DB) instead
+  // of keeping a completed:false row that would leave an empty bar behind.
+  if (!completed) {
+    const hasPomo = phiSessions.some(s => s.taskId === taskId && s.date === today);
+    if (!hasPomo) {
+      const idx = phiCompletions.findIndex(x => x.taskId === taskId && x.date === today);
+      if (idx >= 0) phiCompletions.splice(idx, 1);
+      deleteCompletion(taskId, today);
+      return;
+    }
+  }
+
   let c = phiCompletions.find(x => x.taskId === taskId && x.date === today);
   if (c) {
     c.completed = completed;
