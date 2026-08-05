@@ -126,32 +126,7 @@
     color: var(--text-muted);
   }
 
-  /* Color picker popup */
-  .color-picker-popup {
-    position: fixed;
-    left: 50%;
-    top: 50%;
-    transform: translate(-50%, -50%);
-    background: var(--surface);
-    border-radius: 16px;
-    padding: 24px 24px 28px;
-    z-index: 101;
-    width: 320px;
-    max-width: calc(100% - 32px);
-    display: none;
-  }
-
-  .color-picker-popup.open {
-    display: block;
-  }
-
-  .color-picker-title {
-    font-size: 16px;
-    font-weight: 700;
-    margin-bottom: 20px;
-    text-align: center;
-  }
-
+  /* Project color swatches (inside the project sheet) */
   .color-swatches {
     display: grid;
     grid-template-columns: repeat(5, 1fr);
@@ -536,6 +511,71 @@
     font-size: 13px;
     font-weight: 500;
     padding: 4px 0;
+  }
+
+  /* Card-bottom "+ Add task" input */
+  .add-task-row {
+    margin-top: 6px;
+    display: flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .add-task-input {
+    flex: 1;
+    min-width: 0;
+    box-sizing: border-box;
+    border: none;
+    background: transparent;
+    padding: 8px 10px;
+    border-radius: 8px;
+    font: inherit;
+    font-size: 14px;
+    color: var(--text);
+    transition: background 0.12s;
+  }
+
+  /* Calendar icon inside the card add-task row (deadline + repeat) */
+  .add-task-date-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+    flex-shrink: 0;
+  }
+
+  .add-task-cal-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: transparent;
+    border: none;
+    padding: 4px 6px;
+    color: #cbd5e1;
+    cursor: pointer;
+    line-height: 0;
+    transition: color 0.12s;
+  }
+
+  .add-task-cal-btn:hover {
+    color: var(--text-muted);
+  }
+
+  .add-task-date-wrap.has-date .add-task-cal-btn,
+  .add-task-date-wrap.cal-open .add-task-cal-btn {
+    color: var(--text);
+  }
+
+  .add-task-input::placeholder {
+    color: #cbd5e1;
+  }
+
+  .add-task-input:focus {
+    outline: none;
+    background: #ffffff;
+  }
+
+  .add-task-input:focus::placeholder {
+    color: #64748b;
   }
 
   /* Per-project pomodoro time — inline toggle pill in the card header */

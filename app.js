@@ -45,8 +45,20 @@ let monthCursor = null; // Date at the 1st of the month shown in Monthly view (l
 let activeTab = 'today'; // 'today' | 'projects' | 'monthly'; restored on load
 
 let sheetState = {
-  newProject: { subtasks: [], editingId: null, dateRef: { deadline: '', repeat: null, repeatDay: null, repeatDate: null } }
+  newProject: { editingId: null, color: PALETTE[0] }
 };
+
+// Pending deadline/repeat per project's card "+ Add task" input, keyed by
+// projectId. The card calendar edits this draft; addTaskToProject merges it into
+// the new task and clears it. Shape matches what openSubtaskCalendar expects.
+const addTaskDrafts = {};
+function getAddTaskDraft(projectId) {
+  return addTaskDrafts[projectId] ||
+    (addTaskDrafts[projectId] = { deadline: '', repeat: null, repeatDay: null, repeatDate: null });
+}
+
+// Shared calendar glyph (used by the card add-task icon).
+const CAL_ICON_SVG = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>`;
 
 // ---------- UI preferences (localStorage) ----------
 // Only UI preferences live in localStorage now — all app data is in Supabase.
@@ -484,24 +496,6 @@ function todayISO() {
   return dateISOFromDate(new Date());
 }
 
-function blankSubtask() {
-  return { id: uid(), text: '', deadline: '', repeat: null, repeatDay: null, repeatDate: null };
-}
-
-// A fresh, incomplete task built from a new-project subtask draft.
-function taskFromSubtask(s) {
-  return {
-    id: uid(),
-    text: s.text.trim(),
-    completed: false,
-    deadline: s.deadline || null,
-    completedAt: null,
-    repeat: s.repeat || null,
-    repeatDay: typeof s.repeatDay === 'number' ? s.repeatDay : null,
-    repeatDate: typeof s.repeatDate === 'number' ? s.repeatDate : null
-  };
-}
-
 // "YYYY-MM-DD" -> "N월 N일"
 function fmtKoreanMonthDay(iso) {
   if (!iso) return '';
@@ -920,6 +914,7 @@ function renderToday() {
 
 // ---------- Render: Projects ----------
 function renderProjects() {
+  closeSubtaskCalendar(); // drop any open card calendar before the DOM is rebuilt
   const sub = document.getElementById('projects-subtitle');
   sub.textContent = state.projects.length === 0
     ? 'Tap + to start one'
@@ -966,7 +961,6 @@ function renderProjects() {
         <div class="card-menu">
           <button class="menu-trigger" data-menu="${project.id}" aria-label="Project menu">⋯</button>
           <div class="menu-dropdown" data-menu-for="${project.id}">
-            <button data-action="color" data-project="${project.id}">색상 변경</button>
             <button data-action="edit" data-project="${project.id}">수정</button>
             <button class="danger" data-action="delete" data-project="${project.id}">삭제</button>
           </div>
@@ -984,11 +978,39 @@ function renderProjects() {
             ${t.deadline ? `<span class="task-deadline${deadlinePassed(t.deadline) ? ' overdue' : ''}">${escapeHtml(fmtDeadline(t.deadline))}</span>` : ''}
           </div>`).join('')}
       </div>
-      ${project.tasks.length > 5 ? `<button class="expand-btn" data-expand="${project.id}">${expanded ? 'show less' : 'show more'}</button>` : ''}`;
+      ${project.tasks.length > 5 ? `<button class="expand-btn" data-expand="${project.id}">${expanded ? 'show less' : 'show more'}</button>` : ''}
+      <div class="add-task-row">
+        <input type="text" class="add-task-input" data-add-task="${project.id}" placeholder="+ Add task" autocomplete="off" />
+        <div class="add-task-date-wrap${draftHasDate(project.id) ? ' has-date' : ''}" data-add-date-wrap="${project.id}">
+          <button type="button" class="add-task-cal-btn" data-add-cal="${project.id}" aria-label="마감일/반복 설정">${CAL_ICON_SVG}</button>
+        </div>
+      </div>`;
     content.appendChild(card);
   }
 
   wireTaskToggles(content);
+  content.querySelectorAll('.add-task-input[data-add-task]').forEach(input => {
+    // Web: Enter submits. (Mobile confirm bar comes in part B.)
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        addTaskToProject(input.dataset.addTask, input.value);
+      }
+    });
+  });
+  // Card add-task calendar: reuse the subtask calendar popup on a per-project
+  // draft (deadline + repeat), applied to the task on submit.
+  content.querySelectorAll('.add-task-cal-btn[data-add-cal]').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const pid = btn.dataset.addCal;
+      const wrap = btn.closest('.add-task-date-wrap');
+      if (!wrap) return;
+      openSubtaskCalendar(getAddTaskDraft(pid), wrap, () => {
+        wrap.classList.toggle('has-date', draftHasDate(pid));
+      });
+    });
+  });
   content.querySelectorAll('[data-expand]').forEach(el => {
     el.addEventListener('click', () => {
       const p = state.projects.find(x => x.id === el.dataset.expand);
@@ -1015,13 +1037,6 @@ function renderProjects() {
       const wasOpen = dropdown.classList.contains('open');
       closeAllMenus();
       if (!wasOpen) dropdown.classList.add('open');
-    });
-  });
-  content.querySelectorAll('[data-action="color"]').forEach(el => {
-    el.addEventListener('click', (e) => {
-      e.stopPropagation();
-      closeAllMenus();
-      openColorPicker(el.dataset.project);
     });
   });
   content.querySelectorAll('[data-action="edit"]').forEach(el => {
@@ -1250,6 +1265,37 @@ function deleteProject(projectId) {
   save();
   renderToday();
   renderProjects();
+}
+
+// True when a project's add-task draft has a deadline or a repeat set (drives the
+// card calendar icon's "active" state).
+function draftHasDate(projectId) {
+  const d = addTaskDrafts[projectId];
+  return !!(d && (d.deadline || d.repeat));
+}
+
+// Add a task to a project from the card's "+ Add task" input, then re-render and
+// restore focus on that card's input so tasks can be added back-to-back. Any
+// deadline/repeat set on the card calendar (the draft) is merged in and cleared.
+function addTaskToProject(projectId, text) {
+  const t = text.trim();
+  if (!t) return;
+  const project = state.projects.find(p => p.id === projectId);
+  if (!project) return;
+  const draft = addTaskDrafts[projectId] || {};
+  project.tasks.push({
+    id: uid(), text: t, completed: false, deadline: draft.deadline || null, completedAt: null,
+    repeat: draft.repeat || null,
+    repeatDay: typeof draft.repeatDay === 'number' ? draft.repeatDay : null,
+    repeatDate: typeof draft.repeatDate === 'number' ? draft.repeatDate : null,
+    repeatSpawnedOn: null
+  });
+  project.totalCount = (project.totalCount || 0) + 1;
+  delete addTaskDrafts[projectId]; // reset the draft for the next task
+  save();
+  renderProjects();
+  const input = document.querySelector(`.add-task-input[data-add-task="${projectId}"]`);
+  if (input) input.focus();
 }
 
 // ---------- Monthly view ----------
@@ -1570,34 +1616,6 @@ function openSheet(id) {
 function closeSheets() {
   document.getElementById('overlay').classList.remove('open');
   document.querySelectorAll('.sheet').forEach(s => s.classList.remove('open'));
-  document.getElementById('color-picker').classList.remove('open');
-  pickerProjectId = null;
-}
-
-let pickerProjectId = null;
-
-function openColorPicker(projectId) {
-  const project = state.projects.find(p => p.id === projectId);
-  if (!project) return;
-  pickerProjectId = projectId;
-  const cur = (project.color || '').toLowerCase();
-  const swatches = document.getElementById('color-swatches');
-  swatches.innerHTML = COLOR_PICKER_PALETTE.map(c =>
-    `<button class="color-swatch${c.toLowerCase() === cur ? ' selected' : ''}" style="background:${c}" data-color="${c}" aria-label="${c}"></button>`
-  ).join('');
-  swatches.querySelectorAll('[data-color]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const p = state.projects.find(x => x.id === pickerProjectId);
-      if (!p) return;
-      p.color = btn.dataset.color;
-      save();
-      closeSheets();
-      renderToday();
-      renderProjects();
-    });
-  });
-  document.getElementById('overlay').classList.add('open');
-  document.getElementById('color-picker').classList.add('open');
 }
 
 // ---------- Project sheet (create + edit) ----------
@@ -1605,88 +1623,38 @@ function openProjectSheet(projectId) {
   const editing = projectId ? state.projects.find(p => p.id === projectId) : null;
 
   if (editing) {
-    sheetState.newProject = {
-      editingId: projectId,
-      dateRef: { deadline: editing.targetDate || '', repeat: null, repeatDay: null, repeatDate: null },
-      subtasks: editing.tasks.map(t => ({
-        id: t.id,
-        text: t.text,
-        deadline: t.deadline || '',
-        repeat: t.repeat || null,
-        repeatDay: typeof t.repeatDay === 'number' ? t.repeatDay : null,
-        repeatDate: typeof t.repeatDate === 'number' ? t.repeatDate : null
-      }))
-    };
+    sheetState.newProject = { editingId: projectId, color: editing.color || PALETTE[0] };
     document.getElementById('np-name').value = editing.name;
     document.querySelector('#new-project-sheet .sheet-title').textContent = 'Edit project';
     document.getElementById('np-save').textContent = 'Save changes';
   } else {
-    sheetState.newProject = {
-      editingId: null,
-      dateRef: { deadline: '', repeat: null, repeatDay: null, repeatDate: null },
-      subtasks: [blankSubtask(), blankSubtask()]
-    };
+    sheetState.newProject = { editingId: null, color: nextColor() };
     document.getElementById('np-name').value = '';
     document.querySelector('#new-project-sheet .sheet-title').textContent = 'New project';
     document.getElementById('np-save').textContent = 'Save project';
   }
 
-  renderProjectDateField();
-  renderNewProjectSubtasks();
+  renderProjectColorSwatches();
   openSheet('new-project-sheet');
   if (!editing) {
     setTimeout(() => document.getElementById('np-name').focus(), 350);
   }
 }
 
-function renderNewProjectSubtasks() {
-  closeSubtaskCalendar();
-  const container = document.getElementById('np-subtasks');
-  container.innerHTML = '';
-  sheetState.newProject.subtasks.forEach((st, idx) => {
-    const row = document.createElement('div');
-    row.className = 'subtask-row';
-    const calIcon = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>`;
-    row.innerHTML = `
-      <span class="drag-handle">☰</span>
-      <input class="subtask-input" placeholder="Step ${idx + 1}..." data-st-text="${st.id}" value="${escapeHtml(st.text)}">
-      <div class="subtask-date-wrap${st.deadline ? ' has-date' : ''}">
-        <button class="subtask-cal-btn" data-st-cal="${st.id}" aria-label="Set date">${calIcon}</button>
-        ${st.deadline ? `<span class="subtask-date-label">${escapeHtml(fmtKoreanMonthDay(st.deadline))}</span>` : ''}
-      </div>
-      <button class="remove-subtask" data-st-remove="${st.id}" aria-label="Remove">×</button>`;
-    container.appendChild(row);
-  });
-
-  container.querySelectorAll('[data-st-text]').forEach(el => {
-    el.addEventListener('input', () => {
-      const st = sheetState.newProject.subtasks.find(s => s.id === el.dataset.stText);
-      if (st) st.text = el.value;
+// Render the color swatches inside the project sheet (create + edit). Selecting
+// a swatch just updates the in-memory draft color; it's persisted on save.
+function renderProjectColorSwatches() {
+  const wrap = document.getElementById('np-color-swatches');
+  if (!wrap) return;
+  const cur = (sheetState.newProject.color || '').toLowerCase();
+  wrap.innerHTML = COLOR_PICKER_PALETTE.map(c =>
+    `<button type="button" class="color-swatch${c.toLowerCase() === cur ? ' selected' : ''}" style="background:${c}" data-np-color="${c}" aria-label="${c}"></button>`
+  ).join('');
+  wrap.querySelectorAll('[data-np-color]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      sheetState.newProject.color = btn.dataset.npColor;
+      renderProjectColorSwatches();
     });
-  });
-  container.querySelectorAll('[data-st-cal]').forEach(el => {
-    el.addEventListener('click', () => {
-      const st = sheetState.newProject.subtasks.find(s => s.id === el.dataset.stCal);
-      const wrap = el.closest('.subtask-date-wrap');
-      if (st && wrap) openSubtaskCalendar(st, wrap);
-    });
-  });
-  container.querySelectorAll('[data-st-remove]').forEach(el => {
-    el.addEventListener('click', () => {
-      sheetState.newProject.subtasks = sheetState.newProject.subtasks.filter(s => s.id !== el.dataset.stRemove);
-      if (sheetState.newProject.subtasks.length === 0) {
-        sheetState.newProject.subtasks.push(blankSubtask());
-      }
-      renderNewProjectSubtasks();
-    });
-  });
-
-  // Drag-to-reorder for subtasks
-  attachDrag(container, '.subtask-row', '.drag-handle', (from, to) => {
-    const list = sheetState.newProject.subtasks;
-    const [moved] = list.splice(from, 1);
-    list.splice(to, 0, moved);
-    renderNewProjectSubtasks();
   });
 }
 
@@ -1701,7 +1669,7 @@ function closeSubtaskCalendar() {
 }
 
 function openSubtaskCalendar(st, wrapEl, onPick) {
-  const handlePick = typeof onPick === 'function' ? onPick : renderNewProjectSubtasks;
+  const handlePick = typeof onPick === 'function' ? onPick : () => {};
   // Toggle off if this row's calendar is already open
   if (openCalState && openCalState.wrapEl === wrapEl) {
     closeSubtaskCalendar();
@@ -1798,79 +1766,33 @@ function openSubtaskCalendar(st, wrapEl, onPick) {
   render();
 }
 
-// Project finish-date field (calendar icon + "N월 N일" label next to the name input)
-function renderProjectDateField() {
-  const wrap = document.getElementById('np-date-wrap');
-  const label = document.getElementById('np-date-label');
-  const iso = sheetState.newProject.dateRef.deadline;
-  label.textContent = iso ? fmtKoreanMonthDay(iso) : '';
-  wrap.classList.toggle('has-date', !!iso);
-}
-
-function openProjectDateCalendar() {
-  const wrap = document.getElementById('np-date-wrap');
-  openSubtaskCalendar(sheetState.newProject.dateRef, wrap, renderProjectDateField);
-}
-
+// Save the project sheet. The sheet now edits name + color only; tasks are added
+// from each card's "+ Add task" input, so a brand-new project starts empty.
 function saveProject() {
   const name = document.getElementById('np-name').value.trim();
-  const target = sheetState.newProject.dateRef.deadline;
   if (!name) {
     document.getElementById('np-name').focus();
     return;
   }
-  if (!target) {
-    openProjectDateCalendar();
-    return;
-  }
-
+  const color = sheetState.newProject.color || nextColor();
   const editingId = sheetState.newProject.editingId;
 
   if (editingId) {
     const project = state.projects.find(p => p.id === editingId);
     if (!project) { closeSheets(); return; }
     project.name = name;
-    project.targetDate = target;
-    // Grow totalCount by however many brand-new sub-tasks were added in this edit.
-    const addedCount = sheetState.newProject.subtasks
-      .filter(s => s.text.trim() && !project.tasks.find(t => t.id === s.id)).length;
-    if (typeof project.totalCount !== 'number') project.totalCount = project.tasks.length;
-    if (typeof project.completedCount !== 'number') {
-      project.completedCount = project.tasks.filter(t => t.completed).length;
-    }
-    project.totalCount += addedCount;
-    project.tasks = sheetState.newProject.subtasks
-      .filter(s => s.text.trim())
-      .map(s => {
-        const existing = project.tasks.find(t => t.id === s.id);
-        if (existing) {
-          return {
-            ...existing,
-            text: s.text.trim(),
-            deadline: s.deadline || null,
-            repeat: s.repeat || null,
-            repeatDay: typeof s.repeatDay === 'number' ? s.repeatDay : null,
-            repeatDate: typeof s.repeatDate === 'number' ? s.repeatDate : null
-          };
-        }
-        return taskFromSubtask(s);
-      });
-    // Drop any todayTasks that pointed to removed subtasks
-    state.todayTasks = state.todayTasks.filter(taskId => findTask(taskId));
-    if (pomo.taskId && !findTask(pomo.taskId)) setPomoTask(null);
+    project.color = color;
+    // targetDate is left untouched (the finish-date field was removed from the UI).
   } else {
-    const subtasks = sheetState.newProject.subtasks
-      .filter(s => s.text.trim())
-      .map(taskFromSubtask);
     const project = {
       id: uid(),
       name,
-      color: nextColor(),
-      targetDate: target,
+      color,
+      targetDate: null,
       createdAt: new Date().toISOString(),
-      tasks: subtasks,
+      tasks: [],
       completedCount: 0,
-      totalCount: subtasks.length
+      totalCount: 0
     };
     state.projects.push(project);
   }
@@ -2144,18 +2066,6 @@ function init() {
   // Close any open menu dropdowns on outside click
   document.addEventListener('click', closeAllMenus);
 
-  document.getElementById('np-cal-btn').addEventListener('click', openProjectDateCalendar);
-
-  document.getElementById('np-add-subtask').addEventListener('click', () => {
-    sheetState.newProject.subtasks.push(blankSubtask());
-    renderNewProjectSubtasks();
-    // focus the newest input
-    setTimeout(() => {
-      const inputs = document.querySelectorAll('#np-subtasks .subtask-input');
-      if (inputs.length) inputs[inputs.length - 1].focus();
-    }, 0);
-  });
-
   document.getElementById('np-save').addEventListener('click', saveProject);
 
   document.getElementById('pomo-btn').addEventListener('click', togglePomo);
@@ -2195,7 +2105,7 @@ function init() {
     if (openCalState &&
         !e.target.closest('.subtask-cal-popup') &&
         !e.target.closest('.subtask-cal-btn') &&
-        !e.target.closest('.np-cal-btn')) {
+        !e.target.closest('.add-task-cal-btn')) {
       closeSubtaskCalendar();
     }
   });

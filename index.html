@@ -117,12 +117,6 @@
   </div>
 </div>
 
-<!-- Project color picker popup -->
-<div class="color-picker-popup" id="color-picker">
-  <div class="color-picker-title">프로젝트 색상 변경</div>
-  <div class="color-swatches" id="color-swatches"></div>
-</div>
-
 <!-- Toast -->
 <div class="toast" id="toast"></div>
 
@@ -138,19 +132,10 @@
   </div>
   <div class="sheet-body">
     <label class="input-label">Project name</label>
-    <div class="np-name-row">
-      <input class="input-field" id="np-name" placeholder="e.g. Learn Spanish" autocomplete="off">
-      <div class="np-date-wrap" id="np-date-wrap">
-        <button class="np-cal-btn" id="np-cal-btn" aria-label="Set finish date">
-          <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"></rect><line x1="16" y1="2" x2="16" y2="6"></line><line x1="8" y1="2" x2="8" y2="6"></line><line x1="3" y1="10" x2="21" y2="10"></line></svg>
-        </button>
-        <span class="np-date-label" id="np-date-label"></span>
-      </div>
-    </div>
+    <input class="input-field" id="np-name" placeholder="e.g. Learn Spanish" autocomplete="off">
 
-    <label class="input-label">Sub-tasks</label>
-    <div id="np-subtasks"></div>
-    <button class="add-subtask-row" id="np-add-subtask">+ Add task</button>
+    <label class="input-label">Color</label>
+    <div class="color-swatches" id="np-color-swatches"></div>
   </div>
   <div class="sheet-footer">
     <button class="primary-btn" id="np-save">Save project</button>

@@ -115,41 +115,58 @@ create table public.task_completions (
 
 ---
 
-### Phase 2 — Projects 탭 기능 확장 ⏳ 대기
+### Phase 2a — Projects / Task 관리 CRUD 🚧 진행 중 (2a-5만 남음)
 
-**목표:** 프로젝트를 만드는 것뿐 아니라 **관리**할 수 있는 완성된 CRUD
+**목표:** 프로젝트/task를 만드는 것뿐 아니라 **관리**(수정·삭제·순서·추가·반복)할 수 있게
 
-**작업 범위:**
+#### Project 관리
+- [x] 수정: 이름 + 색상 (하나의 Edit modal로 통합 — 2a-4)
+  - Edit/New project 시트를 **이름 + 색상만** 남기고 통합
+  - subtask 입력 UI + 완료일(targetDate) 필드 **완전 제거** (task는 카드 Add task로, subtask는 2b popover 예정)
+  - 색상은 modal 안 swatch로 선택 → 기존 ⋯메뉴 '색상 변경' + 별도 color picker 팝업 제거 (⋯메뉴 = 수정 / 삭제)
+- [x] 삭제: 브라우저 `confirm()` 유지
+- [ ] 드래그로 카드 순서 변경 (헤더만 잡고 이동) (2a-5) — **별도 진행**
 
-#### Project
-- [ ] Project 수정 (이름, 색상, 마감일)
-- [ ] Project 삭제
-- [ ] Project 색상 변경 (color picker 이미 있음 — 로직 연결)
+#### Task 관리
+- 추가 (2a-1)
+  - [x] Card view 하단에 `[+ Add task]` input 영역
+  - [x] Empty 상태: placeholder 색상 `#cbd5e1`
+  - [x] Input 활성화 시: background `#ffffff`, placeholder line `#64748b`
+  - [x] Web: Enter로 입력 완료
+  - [ ] Mobile: 키보드 위 확정 바 (오른쪽 `v` 체크 아이콘) — 파트 B (보류)
+- ~~드래그로 순서 변경 (2a-3)~~ → **현재 skip** (추후 재개)
+- ~~삭제~~ → **Phase 2b로 이동** (삭제는 popover에서만 실행, popover가 2b에서 구현됨)
 
-#### Task
-- [ ] Task 추가 (프로젝트 내부에서)
-- [ ] Task 수정
-- [ ] Task 삭제
-- [ ] Task 완료 표시
+#### 반복 기능 (Recurrence) — 2a-4 ✅ 구현·검증 완료
+- [x] 매일 / 매주 / 매월 + 마감일: 카드 하단 Add task input 옆 **캘린더 아이콘**에서 설정
+- [x] 기존 `openSubtaskCalendar` 재사용 (프로젝트별 임시 draft에 담아 task 생성 시 병합)
+- [x] 데이터: 기존 `tasks.repeat` / `repeat_day` / `repeat_date` 컬럼 그대로 활용
+- 실환경 검증 완료: 반복(매주)·날짜만 케이스 데이터 정확, 연속 추가 focus 유지, Supabase 영속성 OK
+- ⚠️ 미확인: 실제 한글 IME 조합 후 Enter 흐름 (자동화로 재현 불가) → 필요 시 `isComposing` 가드 추가
 
-#### Subtask
-- [ ] Subtask 생성 (현재 new-project-sheet에만 있음 — 개별 추가 UI 필요)
-- [ ] Subtask 수정
-- [ ] Subtask 삭제
-- [ ] Subtask에 예상 시간 입력
+**참고:**
+- 색상값(`#cbd5e1`·`#64748b`·`#ffffff`)은 CSS 변수화 검토 (미적용)
+- 2a-4에서 dead CSS 정리: `.color-picker-popup` 계열 제거 / subtask 전용 CSS(`.subtask-*`)는 캘린더 팝업(`.cal-*`) 재사용 때문에 일부 잔존
 
-#### 반복 기능 (Recurrence)
-- [ ] 매일 반복 / 매주 반복 / 매월 반복
-- [ ] Supabase 테이블에 recurrence 컬럼 추가
+**단계:** 2a-1 Task 추가 ✅ → ~~2a-3 Task 드래그~~(skip) → 2a-4 반복 + 모달 통합 ✅ → 2a-5 카드 드래그 헤더 제한 (남음)
+(2a-2 Task 삭제는 제외 — 2b popover와 함께)
 
-**DB 스키마 변경 예상:**
-```sql
-ALTER TABLE tasks ADD COLUMN recurrence TEXT;
-ALTER TABLE subtasks ADD COLUMN estimated_minutes INT;
-```
-*실제 스키마는 Claude Code와 상의 후 확정*
+**의존 관계:** Phase 1 완료 후 시작. 2a-5까지 완료 → 검토 → 2b.
 
-**의존 관계:** Phase 1 완료 후 시작
+---
+
+### Phase 2b — 상세 페이지 & Checklist ⏳ 대기 (2a 완료 후)
+
+**목표:** task를 열어 세부 항목(checklist)과 진행률, 마감일을 관리하고, task를 삭제
+
+- [ ] Task 클릭 시 Popover 상세페이지
+  - Web: Project card 옆에 popover (배경 오버레이 없음, dim X) — 원래 화면 위에 살짝 그림자로 떠 있는 느낌
+  - Mobile: 전체화면
+- [ ] Checklist + 진행률 %
+- [ ] Task 마감일 설정
+- [ ] **Task 삭제** (popover 안에서 실행 — 2a에서 이관)
+
+**의존 관계:** Phase 2a 완료 후 시작
 
 ---
 
@@ -211,4 +228,4 @@ ALTER TABLE subtasks ADD COLUMN estimated_minutes INT;
 
 ---
 
-*Last updated: 2026-08-03*
+*Last updated: 2026-08-06*
