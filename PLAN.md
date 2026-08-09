@@ -139,10 +139,23 @@ create table public.task_completions (
 - ~~삭제~~ → **Phase 2b로 이동** (삭제는 popover에서만 실행, popover가 2b에서 구현됨)
 
 #### 반복 기능 (Recurrence) — 2a-4 ✅ 구현·검증 완료
-- [x] 매일 / 매주 / 매월 + 마감일: 카드 하단 Add task input 옆 **캘린더 아이콘**에서 설정
+- [x] 매일 / 매주 / 매월: 카드 하단 Add task input 옆 **캘린더 아이콘**에서 설정
 - [x] 기존 `openSubtaskCalendar` 재사용 (프로젝트별 임시 draft에 담아 task 생성 시 병합)
-- [x] 데이터: 기존 `tasks.repeat` / `repeat_day` / `repeat_date` 컬럼 그대로 활용
-- 실환경 검증 완료: 반복(매주)·날짜만 케이스 데이터 정확, 연속 추가 focus 유지, Supabase 영속성 OK
+- [x] UI 검증 완료: 반복 설정·연속 추가 focus 유지·Supabase 영속성 OK
+
+**반복 로직 = "리셋 방식"** (스폰 방식에서 전환, 실환경+DB 검증 완료):
+- [x] 반복 task는 **하나만 존재**. 복제 생성 안 함. 주기 경계마다 **check 상태만 자동 리셋** (`completed→false`)
+  - 매일 = 매일 자정 / 매주 = **매주 월요일 00:00** / 매월 = **매월 1일 00:00** (고정 경계)
+- [x] 리셋 타이밍: 앱 오픈마다 per-task `lastResetOn`과 현재 경계 비교 → 필요 시 즉시 리셋 (자정에 안 열려 있어도 다음 오픈 시 catch-up). 자정 타이머도 리셋 실행
+- [x] **이력 보존**: 리셋은 `tasks.completed`만 변경, `pomodoro_sessions`·`task_completions` **불변** → Monthly 세션바 이력 그대로
+- [x] 반복 task는 **deadline 없음** (주기로 관리). 생성 시 미설정 + `resetRepeatingTasks`가 stale deadline을 null로 유지
+- [x] 기존 중복(옛 스폰 누적) 정리: 프로젝트 내 같은 이름은 **최신 반복 task 1개만 유지**, 나머지 삭제 (`dedupeRepeatTasks`)
+
+**구현 메모:**
+- 핵심 함수: `repeatBoundaryISO` / `resetRepeatingTasks` / `dedupeRepeatTasks` (모두 멱등, 매 오픈 실행). 구 `processRepeatingTasks`·`repeatDueToday`(스폰) 제거
+- `cleanupCompletedSubtasks`는 repeat task 삭제 제외 (`!t.completed || t.repeat`)
+- DB: **스키마 변경 0**. 기존 `repeat_spawned_on` 컬럼을 `lastResetOn`(마지막 리셋 날짜)으로 재사용
+- `repeat_day` / `repeat_date`는 현재 미사용 (월요일/1일 고정) — 향후 "요일 지정" 대비해 데이터만 유지 (주석 명시)
 - ⚠️ 미확인: 실제 한글 IME 조합 후 Enter 흐름 (자동화로 재현 불가) → 필요 시 `isComposing` 가드 추가
 
 **참고:**
@@ -220,8 +233,14 @@ create table public.task_completions (
 - 요일 그리드는 **월요일 시작(MON~SUN)**
 - `task_completions` 테이블 신설 (`completed` 플래그 + `unique(user_id, task_id, date)` upsert)
 
+### 확정 사항 (Phase 2a)
+- 프로젝트 New/Edit = **이름 + 색상만** (subtask·완료일 필드 제거, 색상 swatch 내장, ⋯메뉴는 수정/삭제)
+- 카드 드래그는 **헤더 핸들에서만** 시작
+- 반복 = **리셋 방식** (복제 스폰 아님): 반복 task 1개 유지, 주기 경계(매일 자정 / 매주 월요일 / 매월 1일)에 check만 리셋, 이력(뽀모·완료 기록)은 불변
+- 반복 task는 **deadline 없음** (주기로 관리)
+
 ### 검토 필요
-- 반복 task의 UX (Today에 어떻게 나타나는지)
+- 반복 task를 Today 탭에 어떻게 노출할지 (현재: 프로젝트 카드에만 존재, Today 자동 추가 없음 — 필요성 재검토)
 
 ### 결정 보류
 - Body doubling 기능

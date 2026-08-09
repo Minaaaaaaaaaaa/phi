@@ -134,9 +134,14 @@ async function loadFromSupabase() {
       deadline: t.deadline || null,
       completedAt: t.completed_at || null,
       repeat: t.repeat || null,
+      // repeatDay/repeatDate are currently unused: the reset model resets on
+      // fixed boundaries (weekly=Monday, monthly=1st), not the task's own weekday
+      // /date. Kept (written on load/save) for a possible future "custom day".
       repeatDay: typeof t.repeat_day === 'number' ? t.repeat_day : null,
       repeatDate: typeof t.repeat_date === 'number' ? t.repeat_date : null,
-      repeatSpawnedOn: t.repeat_spawned_on || null
+      // Date this repeat task's check state was last reset (reuses the old
+      // repeat_spawned_on column; see resetRepeatingTasks).
+      lastResetOn: t.repeat_spawned_on || null
     });
   }
 
@@ -272,7 +277,7 @@ function buildTaskRows() {
         repeat: t.repeat || null,
         repeat_day: typeof t.repeatDay === 'number' ? t.repeatDay : null,
         repeat_date: typeof t.repeatDate === 'number' ? t.repeatDate : null,
-        repeat_spawned_on: t.repeatSpawnedOn || null
+        repeat_spawned_on: t.lastResetOn || null
       });
     });
   });
@@ -716,11 +721,13 @@ function upsertCompletion(found, completed) {
 }
 
 // ---------- Daily cleanup: drop completed sub-tasks ----------
+// Repeat tasks are kept even when completed — they persist and get reset (see
+// resetRepeatingTasks) rather than deleted.
 function cleanupCompletedSubtasks() {
   let changed = false;
   for (const p of state.projects) {
     const before = p.tasks.length;
-    p.tasks = p.tasks.filter(t => !t.completed);
+    p.tasks = p.tasks.filter(t => !t.completed || t.repeat);
     if (p.tasks.length !== before) changed = true;
   }
   if (changed) {
@@ -739,57 +746,97 @@ function clearCompletedFromToday() {
   });
 }
 
-// ---------- Repeating sub-tasks ----------
-function repeatDueToday(task, now) {
-  if (task.repeat === 'daily') return true;
-  if (task.repeat === 'weekly') return now.getDay() === task.repeatDay;
-  if (task.repeat === 'monthly') return now.getDate() === task.repeatDate;
-  return false;
+// ---------- Repeating sub-tasks (reset model) ----------
+// A repeat task is a single, persistent task. Instead of spawning copies, its
+// check state is reset to incomplete at each period boundary: daily = every
+// midnight, weekly = every Monday 00:00, monthly = the 1st at 00:00. Returns the
+// ISO date (YYYY-MM-DD) of the most recent boundary on or before `now`.
+function repeatBoundaryISO(repeat, now) {
+  const d = startOfDay(now);
+  if (repeat === 'daily') return dateISOFromDate(d);
+  if (repeat === 'weekly') {
+    const sinceMonday = (d.getDay() + 6) % 7; // Sun=0..Sat=6 -> days since Monday
+    d.setDate(d.getDate() - sinceMonday);
+    return dateISOFromDate(d);
+  }
+  if (repeat === 'monthly') {
+    d.setDate(1);
+    return dateISOFromDate(d);
+  }
+  return null;
 }
 
-// For each repeating sub-task that is due today (and hasn't already spawned today),
-// add a fresh incomplete instance back to the project and pass the repeat config
-// forward to that new instance (so exactly one active template exists per series).
-function processRepeatingTasks() {
-  const today = todayISO();
+// Reset every repeat task whose latest boundary is newer than its last reset.
+// This ONLY flips the task's own completed/completedAt and advances lastResetOn;
+// it never touches pomodoro_sessions or task_completions, so the Monthly view's
+// per-date history stays intact. Self-gating (lastResetOn) and idempotent, so it
+// is safe to run on every app open — catching up any boundaries missed while the
+// app was closed (e.g. opened Mon, reopened Thu).
+function resetRepeatingTasks() {
   const now = new Date();
   let changed = false;
   for (const p of state.projects) {
-    const templates = p.tasks.filter(t => t.repeat);
-    for (const src of templates) {
-      if (src.repeatSpawnedOn === today) continue;
-      if (!repeatDueToday(src, now)) continue;
-      p.tasks.push({
-        id: uid(),
-        text: src.text,
-        completed: false,
-        deadline: today,
-        completedAt: null,
-        repeat: src.repeat,
-        repeatDay: src.repeatDay,
-        repeatDate: src.repeatDate,
-        repeatSpawnedOn: today
-      });
-      // The previous instance is no longer the active template for this series.
-      src.repeat = null;
-      src.repeatDay = null;
-      src.repeatDate = null;
-      src.repeatSpawnedOn = null;
-      changed = true;
+    for (const t of p.tasks) {
+      if (!t.repeat) continue;
+      // Repeat tasks carry no deadline (managed by period). Clears any stale
+      // deadline left by the old spawn logic; idempotent thereafter.
+      if (t.deadline != null) { t.deadline = null; changed = true; }
+      const boundary = repeatBoundaryISO(t.repeat, now);
+      if (!boundary) continue;
+      if (t.lastResetOn == null) {
+        // First encounter: anchor to the current boundary without resetting.
+        t.lastResetOn = boundary;
+        changed = true;
+      } else if (t.lastResetOn < boundary) {
+        if (t.completed) { t.completed = false; t.completedAt = null; }
+        t.lastResetOn = boundary;
+        changed = true;
+      }
     }
+  }
+  return changed;
+}
+
+// One-time migration for duplicates left by the old spawn-based logic. Within a
+// project, for every text that has at least one repeat task, keep only a single
+// repeat task (the last one — the most recent) and drop everything else sharing
+// that text (leftover spawned copies, whether repeat or not). Texts with no
+// repeat task are left untouched. Idempotent, so safe to run on every open.
+function dedupeRepeatTasks() {
+  let changed = false;
+  for (const p of state.projects) {
+    const repeatTexts = new Set(p.tasks.filter(t => t.repeat).map(t => t.text));
+    if (repeatTexts.size === 0) continue;
+    // The single task to keep per text: the last repeat task with that text.
+    const keep = new Map();
+    for (const t of p.tasks) {
+      if (t.repeat && repeatTexts.has(t.text)) keep.set(t.text, t);
+    }
+    const before = p.tasks.length;
+    p.tasks = p.tasks.filter(t =>
+      !repeatTexts.has(t.text) ? true : keep.get(t.text) === t);
+    if (p.tasks.length !== before) changed = true;
+  }
+  if (changed) {
+    state.todayTasks = state.todayTasks.filter(id => findTask(id));
+    if (pomo.taskId && !findTask(pomo.taskId)) setPomoTask(null);
   }
   return changed;
 }
 
 function runDailyCleanupIfNeeded() {
   const today = todayISO();
+  // Repeat dedupe + reset are per-task, self-gating and idempotent, so run on
+  // every open (this is what catches boundaries missed while the app was closed).
+  let changed = dedupeRepeatTasks();
+  changed = resetRepeatingTasks() || changed;
+  // Deleting completed non-repeat tasks stays a once-a-day job.
   const last = localStorage.getItem('lastCleanupDate');
   if (last !== today) {
-    processRepeatingTasks();
-    cleanupCompletedSubtasks();
+    changed = cleanupCompletedSubtasks() || changed;
     localStorage.setItem('lastCleanupDate', today);
-    save();
   }
+  if (changed) save();
 }
 
 let midnightCleanupTimer = null;
@@ -800,7 +847,7 @@ function scheduleMidnightCleanup() {
   nextMidnight.setHours(24, 0, 0, 0); // start of tomorrow
   const ms = (nextMidnight - now) + 1000; // small buffer past 00:00
   midnightCleanupTimer = setTimeout(() => {
-    processRepeatingTasks();
+    resetRepeatingTasks();
     cleanupCompletedSubtasks();
     localStorage.setItem('lastCleanupDate', todayISO());
     save();
@@ -1295,11 +1342,14 @@ function addTaskToProject(projectId, text) {
   if (!project) return;
   const draft = addTaskDrafts[projectId] || {};
   project.tasks.push({
-    id: uid(), text: t, completed: false, deadline: draft.deadline || null, completedAt: null,
+    // Repeat tasks are managed by their period, not a due date, so they never
+    // carry a deadline (repeat wins if both were picked on the calendar).
+    id: uid(), text: t, completed: false, deadline: draft.repeat ? null : (draft.deadline || null), completedAt: null,
     repeat: draft.repeat || null,
     repeatDay: typeof draft.repeatDay === 'number' ? draft.repeatDay : null,
     repeatDate: typeof draft.repeatDate === 'number' ? draft.repeatDate : null,
-    repeatSpawnedOn: null
+    // Anchor a new repeat task to today so it isn't reset on the next open.
+    lastResetOn: draft.repeat ? todayISO() : null
   });
   project.totalCount = (project.totalCount || 0) + 1;
   delete addTaskDrafts[projectId]; // reset the draft for the next task
