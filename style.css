@@ -508,6 +508,16 @@
     color: #F40224;
   }
 
+  /* Repeat task's "today" tag. Its own class (not .task-deadline) so the
+     completed-state hide + text strikethrough never apply to it — it stays
+     visible and un-struck even when the task is checked. */
+  .task-today {
+    font-size: 12px;
+    color: #62748E;
+    white-space: nowrap;
+    flex-shrink: 0;
+  }
+
   .project-task.completed .checkbox.checked {
     background: #D8D8D8;
     border-color: #D8D8D8;

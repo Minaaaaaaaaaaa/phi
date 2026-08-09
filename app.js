@@ -486,6 +486,28 @@ function deadlinePassed(iso) {
   return diffDays(d, startOfDay(new Date())) < 0;
 }
 
+// Status pill HTML for a task row, or '' if none. Two separate concepts:
+//   - deadline  = a one-off task's due date (repeat tasks never carry one)
+//   - "오늘"     = a repeat task's per-period tag, always shown (even when
+//                 checked): only the task text gets the completed strikethrough,
+//                 not this label. Card variant uses the dedicated `task-today`
+//                 class so the completed-state rules (hide/strikethrough) skip it.
+// `variant`: 'card' -> project cards, 'pill' -> today / picker.
+function taskStatusPill(task, variant) {
+  if (task.repeat) {
+    if (variant === 'card') return `<span class="task-today">today</span>`;
+    return `<span class="pill deadline-pill">today</span>`;
+  }
+  if (task.deadline) {
+    const overdue = deadlinePassed(task.deadline);
+    if (variant === 'card') {
+      return `<span class="task-deadline${overdue ? ' overdue' : ''}">${escapeHtml(fmtDeadline(task.deadline))}</span>`;
+    }
+    return `<span class="pill deadline-pill">${escapeHtml(fmtDeadline(task.deadline))}</span>`;
+  }
+  return '';
+}
+
 // Date -> "YYYY-MM-DD" (local time). The single source of truth for ISO keys.
 function dateISOFromDate(d) {
   return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate());
@@ -899,7 +921,7 @@ function renderToday() {
           <div class="suggestion-task" data-suggest="${s.task.id}">
             <span class="project-line" style="background:${s.project.color}"></span>
             <span class="task-text">${escapeHtml(s.task.text)}</span>
-            ${s.task.deadline ? `<span class="pill deadline-pill">${escapeHtml(fmtDeadline(s.task.deadline))}</span>` : ''}
+            ${taskStatusPill(s.task, 'pill')}
           </div>`).join('')}`;
       content.appendChild(card);
       card.querySelectorAll('[data-suggest]').forEach(el => {
@@ -1022,7 +1044,7 @@ function renderProjects() {
           <div class="project-task ${t.completed ? 'completed' : ''}" data-task-row="${t.id}">
             <button class="checkbox ${t.completed ? 'checked' : ''}" data-toggle="${t.id}" aria-label="Toggle"></button>
             <span class="task-text">${escapeHtml(t.text)}</span>
-            ${t.deadline ? `<span class="task-deadline${deadlinePassed(t.deadline) ? ' overdue' : ''}">${escapeHtml(fmtDeadline(t.deadline))}</span>` : ''}
+            ${taskStatusPill(t, 'card')}
           </div>`).join('')}
       </div>
       ${project.tasks.length > 5 ? `<button class="expand-btn" data-expand="${project.id}">${expanded ? 'show less' : 'show more'}</button>` : ''}
@@ -1892,7 +1914,7 @@ function openPicker() {
         ${incomplete.map(t => `
           <div class="picker-task ${state.todayTasks.includes(t.id) ? 'selected' : ''}" data-pick="${t.id}">
             <span class="task-text">${escapeHtml(t.text)}</span>
-            ${t.deadline ? `<span class="pill deadline-pill">${escapeHtml(fmtDeadline(t.deadline))}</span>` : ''}
+            ${taskStatusPill(t, 'pill')}
           </div>`).join('')}`;
       body.appendChild(group);
     }
