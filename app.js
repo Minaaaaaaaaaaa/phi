@@ -1059,7 +1059,7 @@ function renderProjects() {
     });
   });
 
-  // Drag-to-reorder for project cards (whole-card; long-press on touch)
+  // Drag-to-reorder for project cards (header handle only; long-press on touch)
   attachCardDrag(content, (from, to) => {
     const [moved] = state.projects.splice(from, 1);
     state.projects.splice(to, 0, moved);
@@ -1078,12 +1078,22 @@ function attachCardDrag(container, onReorder) {
   const clearTargets = () => cards.forEach(c => c.classList.remove('drop-target'));
   const isInteractive = (target) =>
     !!target.closest('button, input, a, .menu-dropdown, .project-task');
+  // Drag starts only from the card header (excluding its ⋯ menu button), so the
+  // rest of the card stays free for tapping tasks, adding tasks, etc.
+  const isDragHandle = (target) =>
+    !!target.closest('.project-header') && !isInteractive(target);
 
   cards.forEach(card => {
-    card.draggable = true;
+    // Native DnD reports dragstart's target as the draggable element (the card),
+    // not the grabbed descendant — so the header can't be detected there. Instead
+    // we flip `draggable` on mousedown based on where the pointer actually landed,
+    // so a drag can only originate from the header handle.
+    card.draggable = false;
+    card.addEventListener('mousedown', (e) => {
+      card.draggable = isDragHandle(e.target);
+    });
 
     card.addEventListener('dragstart', (e) => {
-      if (isInteractive(e.target)) { e.preventDefault(); return; }
       drag = { type: 'html5', card, from: idxOf(card) };
       card.classList.add('dragging');
       e.dataTransfer.effectAllowed = 'move';
@@ -1092,6 +1102,7 @@ function attachCardDrag(container, onReorder) {
 
     card.addEventListener('dragend', () => {
       card.classList.remove('dragging');
+      card.draggable = false;
       clearTargets();
       drag = null;
     });
@@ -1113,9 +1124,9 @@ function attachCardDrag(container, onReorder) {
       if (from !== to) onReorder(from, to);
     });
 
-    // Touch: long-press (300ms) on a non-interactive area to start drag
+    // Touch: long-press (300ms) on the header to start drag
     card.addEventListener('touchstart', (e) => {
-      if (isInteractive(e.target)) return;
+      if (!isDragHandle(e.target)) return;
       if (e.touches.length !== 1) return;
       const t = e.touches[0];
       pressStart = { x: t.clientX, y: t.clientY };

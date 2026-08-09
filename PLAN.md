@@ -115,7 +115,7 @@ create table public.task_completions (
 
 ---
 
-### Phase 2a — Projects / Task 관리 CRUD 🚧 진행 중 (2a-5만 남음)
+### Phase 2a — Projects / Task 관리 CRUD ✅ 완료 (Mobile 확정 바만 보류)
 
 **목표:** 프로젝트/task를 만드는 것뿐 아니라 **관리**(수정·삭제·순서·추가·반복)할 수 있게
 
@@ -125,7 +125,8 @@ create table public.task_completions (
   - subtask 입력 UI + 완료일(targetDate) 필드 **완전 제거** (task는 카드 Add task로, subtask는 2b popover 예정)
   - 색상은 modal 안 swatch로 선택 → 기존 ⋯메뉴 '색상 변경' + 별도 color picker 팝업 제거 (⋯메뉴 = 수정 / 삭제)
 - [x] 삭제: 브라우저 `confirm()` 유지
-- [ ] 드래그로 카드 순서 변경 (헤더만 잡고 이동) (2a-5) — **별도 진행**
+- [x] 드래그로 카드 순서 변경 (헤더만 잡고 이동) (2a-5)
+  - `mousedown` 위치가 `.project-header`일 때만 `draggable`을 켜서 드래그 시작 (헤더 밖·⋯메뉴·본문은 드래그 안 됨). 터치는 헤더 롱프레스. 실환경 검증 완료.
 
 #### Task 관리
 - 추가 (2a-1)
@@ -148,10 +149,10 @@ create table public.task_completions (
 - 색상값(`#cbd5e1`·`#64748b`·`#ffffff`)은 CSS 변수화 검토 (미적용)
 - 2a-4에서 dead CSS 정리: `.color-picker-popup` 계열 제거 / subtask 전용 CSS(`.subtask-*`)는 캘린더 팝업(`.cal-*`) 재사용 때문에 일부 잔존
 
-**단계:** 2a-1 Task 추가 ✅ → ~~2a-3 Task 드래그~~(skip) → 2a-4 반복 + 모달 통합 ✅ → 2a-5 카드 드래그 헤더 제한 (남음)
-(2a-2 Task 삭제는 제외 — 2b popover와 함께)
+**단계:** 2a-1 Task 추가 ✅ → ~~2a-3 Task 드래그~~(skip) → 2a-4 반복 + 모달 통합 ✅ → 2a-5 카드 드래그 헤더 제한 ✅
+(2a-2 Task 삭제는 제외 — 2b popover와 함께 / 2a-1 파트 B Mobile 확정 바는 보류)
 
-**의존 관계:** Phase 1 완료 후 시작. 2a-5까지 완료 → 검토 → 2b.
+**의존 관계:** Phase 1 완료 후 시작. Phase 2a 완료 → 검토 → 2b.
 
 ---
 
@@ -228,4 +229,4 @@ create table public.task_completions (
 
 ---
 
-*Last updated: 2026-08-06*
+*Last updated: 2026-08-09*
