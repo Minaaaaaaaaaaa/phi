@@ -486,26 +486,36 @@ function deadlinePassed(iso) {
   return diffDays(d, startOfDay(new Date())) < 0;
 }
 
-// Status pill HTML for a task row, or '' if none. Two separate concepts:
-//   - deadline  = a one-off task's due date (repeat tasks never carry one)
-//   - "오늘"     = a repeat task's per-period tag, always shown (even when
-//                 checked): only the task text gets the completed strikethrough,
-//                 not this label. Card variant uses the dedicated `task-today`
-//                 class so the completed-state rules (hide/strikethrough) skip it.
-// `variant`: 'card' -> project cards, 'pill' -> today / picker.
+// Status label HTML for a task row, or '' if none. Two variants:
+//   'card' (Projects) — Korean deadline text (오늘 / N일 남음 / N일 지남); a repeat
+//     task shows the persistent "today" tag via the dedicated .task-today class
+//     (so the completed-state hide/strikethrough rules skip it).
+//   'pill' (Today) — compact mockup states: repeat / due-today -> "today";
+//     future -> "D-N"; overdue -> "yesterday" / "D+N"; no deadline -> "ongoing".
+//     The state class (.today / .overdue) drives the retro color.
 function taskStatusPill(task, variant) {
-  if (task.repeat) {
-    if (variant === 'card') return `<span class="task-today">today</span>`;
-    return `<span class="pill deadline-pill">today</span>`;
-  }
-  if (task.deadline) {
-    const overdue = deadlinePassed(task.deadline);
-    if (variant === 'card') {
-      return `<span class="task-deadline${overdue ? ' overdue' : ''}">${escapeHtml(fmtDeadline(task.deadline))}</span>`;
+  if (variant === 'card') {
+    if (task.repeat) return `<span class="task-today">today</span>`;
+    if (task.deadline) {
+      const overdue = deadlinePassed(task.deadline) ? ' overdue' : '';
+      return `<span class="task-deadline${overdue}">${escapeHtml(fmtDeadline(task.deadline))}</span>`;
     }
-    return `<span class="pill deadline-pill">${escapeHtml(fmtDeadline(task.deadline))}</span>`;
+    return '';
   }
-  return '';
+  // 'pill' variant (Today tab only)
+  let text, cls = '';
+  if (task.repeat) {
+    text = 'today'; cls = 'today';
+  } else if (task.deadline) {
+    const days = diffDays(new Date(task.deadline + 'T00:00:00'), startOfDay(new Date()));
+    if (days === 0) { text = 'today'; cls = 'today'; }
+    else if (days > 0) { text = 'D-' + days; }
+    else if (days === -1) { text = 'yesterday'; cls = 'overdue'; }
+    else { text = 'D+' + (-days); cls = 'overdue'; }
+  } else {
+    text = 'ongoing';
+  }
+  return `<span class="pill deadline-pill${cls ? ' ' + cls : ''}">${text}</span>`;
 }
 
 // Date -> "YYYY-MM-DD" (local time). The single source of truth for ISO keys.
@@ -961,6 +971,7 @@ function renderToday() {
         <button class="checkbox ${task.completed ? 'checked' : ''}" data-toggle="${task.id}" aria-label="Toggle"></button>
         <span class="project-line" style="background:${project.color}"></span>
         <span class="task-text" data-focus="${task.id}">${escapeHtml(task.text)}</span>
+        ${taskStatusPill(task, 'pill')}
         <span class="pill project-pill">${escapeHtml(project.name)}</span>`;
       list.appendChild(row);
     }
