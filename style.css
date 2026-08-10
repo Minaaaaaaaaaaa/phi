@@ -1630,8 +1630,10 @@
      base + responsive rules.
      ============================================================ */
 
-  /* Screen background + pixel font (Today only) */
-  :root[data-tab="today"] body {
+  /* Screen background + pixel font (Today only). .app carries its own bg
+     (var(--bg)) on top of body, so it must be overridden too. */
+  :root[data-tab="today"] body,
+  :root[data-tab="today"] .app {
     background: var(--r-bg);
   }
   :root[data-tab="today"] #today-view,
@@ -1645,10 +1647,37 @@
     font-family: 'Galmuri11', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
   }
 
-  /* Header — "Today" title + date */
+  /* Header — mockup's app-header: a full-bleed dark ink title bar holding
+     "Today" (cream), with the date sitting below it on the cream background.
+     The title is full-bleed via negative margins that cancel the mobile
+     .view padding (24px top / 20px sides); the desktop override below resets
+     them for the centered column. */
+  :root[data-tab="today"] #today-view .header {
+    display: block;
+    margin-bottom: 16px;
+  }
+  :root[data-tab="today"] #today-view .header > div {
+    display: block;
+  }
   :root[data-tab="today"] #today-view .header-title {
-    color: var(--r-ink);
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: var(--r-ink);
+    color: var(--r-card);
+    margin: -24px -20px 0;
+    padding: 14px 20px;
+    font-size: 22px;
     letter-spacing: 0.5px;
+  }
+  /* Mockup's .header-stripes: 3 horizontal pixel lines filling the space to the
+     right of "Today" inside the ink title bar. */
+  :root[data-tab="today"] #today-view .header-title::after {
+    content: '';
+    flex: 1;
+    height: 12px;
+    background-image: repeating-linear-gradient(to bottom, var(--r-ink-mid) 0 2px, transparent 2px 4px);
+    opacity: 0.7;
   }
   :root[data-tab="today"] #today-view .header-date,
   :root[data-tab="today"] #today-date {
@@ -1657,6 +1686,8 @@
     letter-spacing: 0.5px;
     font-size: 12px;
     font-weight: 700;
+    margin-top: 0;
+    padding-top: 12px;
   }
 
   /* Task rows */
@@ -1763,8 +1794,8 @@
     box-shadow: 5px 5px 0 var(--r-shadow);
     color: var(--r-card);
   }
-  :root[data-tab="today"] .pomo-label { color: var(--r-gold); opacity: 1; letter-spacing: 1.5px; }
-  :root[data-tab="today"] .pomo-task { color: var(--r-card); }
+  :root[data-tab="today"] .pomo-label { color: var(--r-gold); opacity: 1; letter-spacing: 1.5px; font-weight: 700; }
+  :root[data-tab="today"] .pomo-task { color: var(--r-card); font-weight: 700; }
   :root[data-tab="today"] .pomo-timer { color: var(--r-card); }
   :root[data-tab="today"] .pomo-btn {
     background: var(--r-gold);
@@ -1807,4 +1838,13 @@
   :root[data-tab="today"] .top-nav-links a.active {
     color: var(--r-ink);
     border-bottom-color: var(--r-ink);
+  }
+
+  /* Desktop: the Today view is a centered column with no side padding, so the
+     header title bar must not use the mobile full-bleed negative margins. */
+  @media (min-width: 768px) {
+    :root[data-tab="today"] #today-view .header-title {
+      margin: 0;
+      padding: 14px 16px;
+    }
   }
