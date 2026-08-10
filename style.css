@@ -10,6 +10,46 @@
     --dark: #363144;
   }
 
+  /* ============================================================
+     Retro (vintage-pixel) foundation — used by the Today tab only.
+     Galmuri11 pixel font from CDN (Regular + Bold, woff2). Palette
+     tokens are namespaced --r-* so they never clobber the app's
+     existing --bg/--teal/etc. They are referenced only inside the
+     :root[data-tab="today"] retro block further down, so Projects
+     and Monthly are unaffected.
+     ============================================================ */
+  @font-face {
+    font-family: 'Galmuri11';
+    font-weight: 400;
+    font-style: normal;
+    font-display: swap;
+    src: url('https://cdn.jsdelivr.net/gh/quiple/galmuri/dist/Galmuri11.woff2') format('woff2');
+  }
+  @font-face {
+    font-family: 'Galmuri11';
+    font-weight: 700;
+    font-style: normal;
+    font-display: swap;
+    src: url('https://cdn.jsdelivr.net/gh/quiple/galmuri/dist/Galmuri11-Bold.woff2') format('woff2');
+  }
+
+  :root {
+    --r-bg:         #e7d8ae;
+    --r-card:       #f3e9d0;
+    --r-card-soft:  #ecdebb;
+    --r-ink:        #211510;
+    --r-ink-mid:    #6e5842;
+    --r-ink-light:  #a4906c;
+    --r-plum:       #764069;
+    --r-terracotta: #a8624c;
+    --r-teal:       #256f5d;
+    --r-gold:       #bd8a2e;
+    --r-slate:      #4b5795;
+    --r-rose:       #8a5062;
+    --r-track:      #d8c89c;
+    --r-shadow:     rgba(33, 21, 16, 0.4);
+  }
+
   * {
     box-sizing: border-box;
     -webkit-tap-highlight-color: transparent;
