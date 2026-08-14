@@ -1848,3 +1848,162 @@
       padding: 14px 16px;
     }
   }
+
+  /* ============================================================
+     PROJECTS TAB — vintage-pixel retro skin.
+     Scoped under :root[data-tab="projects"] (set on <html> only while
+     Projects is active) — Today and Monthly keep their look. Skin-only:
+     the mockup's per-task badges/progress bars/subtask counts depend on
+     subtask data the app doesn't have, so tasks stay as simple rows.
+     Reuses the --r-* tokens and Galmuri font from the Today block.
+     ============================================================ */
+
+  /* Screen background + pixel font */
+  :root[data-tab="projects"] body,
+  :root[data-tab="projects"] .app {
+    background: var(--r-bg);
+  }
+  :root[data-tab="projects"] #projects-view,
+  :root[data-tab="projects"] #projects-view *,
+  :root[data-tab="projects"] .menu-dropdown,
+  :root[data-tab="projects"] .menu-dropdown *,
+  :root[data-tab="projects"] .tab-bar,
+  :root[data-tab="projects"] .tab-bar *,
+  :root[data-tab="projects"] .top-nav,
+  :root[data-tab="projects"] .top-nav * {
+    font-family: 'Galmuri11', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  }
+
+  /* Header — full-bleed dark ink title bar ("Projects" + "+" button) */
+  :root[data-tab="projects"] #projects-view .header {
+    background: var(--r-ink);
+    align-items: center;
+    margin: -24px -20px 16px;
+    padding: 12px 16px;
+  }
+  :root[data-tab="projects"] #projects-view .header-title { color: var(--r-card); letter-spacing: 0.5px; }
+  :root[data-tab="projects"] #projects-subtitle { color: var(--r-card-soft); text-transform: uppercase; letter-spacing: 0.5px; font-size: 12px; font-weight: 700; }
+  :root[data-tab="projects"] #projects-view .logout-link { color: var(--r-ink-light); }
+  :root[data-tab="projects"] #projects-view .icon-btn {
+    background: var(--r-card);
+    color: var(--r-ink);
+    border: 2px solid var(--r-ink);
+    border-radius: 3px;
+  }
+
+  /* Project card -> mockup .project-window (3px ink frame + hard shadow) */
+  :root[data-tab="projects"] .project-card {
+    background: var(--r-card);
+    border: 3px solid var(--r-ink);
+    border-radius: 0;
+    box-shadow: 5px 5px 0 var(--r-shadow);
+    padding: 16px;
+  }
+  /* Header row -> full-bleed dark ink titlebar at the top of the card */
+  :root[data-tab="projects"] .project-header {
+    background: var(--r-ink);
+    margin: -16px -16px 12px;
+    padding: 9px 10px;
+  }
+  /* Color dot -> mockup .project-icon (colored square, no glyph) */
+  :root[data-tab="projects"] .project-dot {
+    width: 22px;
+    height: 22px;
+    border-radius: 0;
+    border: 2px solid var(--r-card);
+  }
+  :root[data-tab="projects"] .project-header .project-name { color: var(--r-card); font-size: 16px; }
+  :root[data-tab="projects"] .project-header .menu-trigger { color: var(--r-card); }
+
+  /* ⋯ menu dropdown (Edit / Delete) */
+  :root[data-tab="projects"] .menu-dropdown {
+    background: var(--r-card);
+    border: 2.5px solid var(--r-ink);
+    border-radius: 0;
+    box-shadow: 4px 4px 0 var(--r-shadow);
+    padding: 0;
+  }
+  :root[data-tab="projects"] .menu-dropdown button {
+    color: var(--r-ink);
+    border-radius: 0;
+    border-bottom: 1.5px solid var(--r-ink);
+    font-weight: 700;
+  }
+  :root[data-tab="projects"] .menu-dropdown button:last-child { border-bottom: none; }
+  :root[data-tab="projects"] .menu-dropdown button.danger { color: var(--r-terracotta); }
+  :root[data-tab="projects"] .menu-dropdown button:hover,
+  :root[data-tab="projects"] .menu-dropdown button:active { background: var(--r-ink); color: var(--r-card); }
+  :root[data-tab="projects"] .menu-dropdown button.danger:hover,
+  :root[data-tab="projects"] .menu-dropdown button.danger:active { background: var(--r-terracotta); color: var(--r-card); }
+
+  /* Heat row (kept) — square heat boxes + retro time pill */
+  :root[data-tab="projects"] .heat-box { border-radius: 0; }
+  :root[data-tab="projects"] .project-time-inline {
+    background: var(--r-card-soft);
+    color: var(--r-ink);
+    border: 1.5px solid var(--r-ink);
+    border-radius: 0;
+    font-weight: 700;
+  }
+  :root[data-tab="projects"] .project-time-inline:active { background: var(--r-track); }
+
+  /* Task rows (simple) */
+  :root[data-tab="projects"] .project-task + .project-task { border-top-color: var(--r-track); }
+  :root[data-tab="projects"] .project-task .checkbox {
+    border-radius: 0;
+    border: 1.5px solid var(--r-ink);
+    background: var(--r-card);
+    transition: none;
+  }
+  :root[data-tab="projects"] .project-task .checkbox.checked { background: var(--r-ink-light); border-color: var(--r-ink-light); color: var(--r-ink); }
+  :root[data-tab="projects"] .project-task .task-text { color: var(--r-ink); font-weight: 700; }
+  :root[data-tab="projects"] .project-task.completed .task-text { color: var(--r-ink-light); }
+  :root[data-tab="projects"] .project-task.completed .checkbox.checked { background: var(--r-ink-light); border-color: var(--r-ink-light); }
+  :root[data-tab="projects"] .task-today { color: var(--r-ink-mid); }
+  :root[data-tab="projects"] .task-deadline { color: var(--r-ink-light); }
+  :root[data-tab="projects"] .task-deadline.overdue { color: var(--r-terracotta); }
+
+  :root[data-tab="projects"] .expand-btn { color: var(--r-ink-mid); font-weight: 700; }
+
+  /* Add task row -> dashed retro box (input + calendar) */
+  :root[data-tab="projects"] .add-task-row {
+    border: 1.5px dashed var(--r-ink-light);
+    padding: 6px 10px;
+  }
+  :root[data-tab="projects"] .add-task-input { color: var(--r-ink); font-weight: 700; }
+  :root[data-tab="projects"] .add-task-input::placeholder { color: var(--r-ink-light); }
+  :root[data-tab="projects"] .add-task-input:focus { background: transparent; }
+  :root[data-tab="projects"] .add-task-input:focus::placeholder { color: var(--r-ink-mid); }
+  :root[data-tab="projects"] .add-task-cal-btn { color: var(--r-ink-light); }
+  :root[data-tab="projects"] .add-task-date-wrap.has-date .add-task-cal-btn,
+  :root[data-tab="projects"] .add-task-date-wrap.cal-open .add-task-cal-btn { color: var(--r-ink); }
+
+  /* Empty state */
+  :root[data-tab="projects"] .empty-state { color: var(--r-ink-mid); }
+  :root[data-tab="projects"] .empty-state-cta { color: var(--r-plum); font-weight: 700; }
+
+  /* Bottom tab bar (mobile) */
+  :root[data-tab="projects"] .tab-bar {
+    background: var(--r-card);
+    border: 2px solid var(--r-ink);
+    border-radius: 0;
+    box-shadow: 4px 4px 0 var(--r-shadow);
+  }
+  :root[data-tab="projects"] .tab-btn { color: var(--r-ink-mid); border-radius: 0; font-weight: 700; }
+  :root[data-tab="projects"] .tab-btn.active { background: var(--r-ink); color: var(--r-card); }
+
+  /* Top nav (desktop) — retro tint while Projects is active */
+  :root[data-tab="projects"] .top-nav {
+    background: var(--r-card);
+    border-bottom: 2px solid var(--r-ink);
+  }
+  :root[data-tab="projects"] .top-nav-logo { color: var(--r-ink); }
+  :root[data-tab="projects"] .top-nav-links a { color: var(--r-ink-mid); font-weight: 700; }
+  :root[data-tab="projects"] .top-nav-links a.active { color: var(--r-ink); border-bottom-color: var(--r-ink); }
+
+  /* Desktop: no side padding on the view, so the header must not full-bleed. */
+  @media (min-width: 768px) {
+    :root[data-tab="projects"] #projects-view .header {
+      margin: 0 0 16px;
+    }
+  }
