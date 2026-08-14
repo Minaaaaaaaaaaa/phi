@@ -2007,3 +2007,60 @@
       margin: 0 0 16px;
     }
   }
+
+  /* New/Edit Project bottom sheet — retro skin of the mockup's .project-popup.
+     Opened only from the Projects tab (openProjectSheet), so it's scoped there.
+     Kept as a bottom sheet; only the look changes. */
+  :root[data-tab="projects"] #new-project-sheet,
+  :root[data-tab="projects"] #new-project-sheet * {
+    font-family: 'Galmuri11', 'Apple SD Gothic Neo', 'Malgun Gothic', sans-serif;
+  }
+  :root[data-tab="projects"] #new-project-sheet {
+    background: var(--r-card);
+    border: 3px solid var(--r-ink);
+    border-radius: 0;
+    box-shadow: 0 -6px 0 var(--r-shadow);
+  }
+  :root[data-tab="projects"] #new-project-sheet .sheet-handle { background: var(--r-ink-light); border-radius: 0; }
+  :root[data-tab="projects"] #new-project-sheet .sheet-header {
+    background: var(--r-ink);
+    padding: 10px 14px;
+  }
+  :root[data-tab="projects"] #new-project-sheet .sheet-title { color: var(--r-card); letter-spacing: 0.4px; }
+  :root[data-tab="projects"] #new-project-sheet .sheet-close { color: var(--r-card-soft); }
+  :root[data-tab="projects"] #new-project-sheet .input-label {
+    color: var(--r-ink);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 700;
+    font-size: 11px;
+  }
+  :root[data-tab="projects"] #new-project-sheet .input-field {
+    background: var(--r-card-soft);
+    border: 2px solid var(--r-ink);
+    border-radius: 0;
+    color: var(--r-ink);
+    font-weight: 700;
+  }
+  :root[data-tab="projects"] #new-project-sheet .input-field:focus { border-color: var(--r-ink); }
+  :root[data-tab="projects"] #new-project-sheet .input-field::placeholder { color: var(--r-ink-light); }
+  :root[data-tab="projects"] #new-project-sheet .color-swatch {
+    border-radius: 0;
+    border: 2px solid var(--r-ink);
+  }
+  :root[data-tab="projects"] #new-project-sheet .color-swatch.selected {
+    outline: 2px solid var(--r-ink);
+    outline-offset: 3px;
+  }
+  :root[data-tab="projects"] #new-project-sheet .sheet-footer {
+    background: var(--r-card);
+    border-top: 2px solid var(--r-ink);
+  }
+  :root[data-tab="projects"] #new-project-sheet .primary-btn {
+    background: var(--r-ink);
+    color: var(--r-card);
+    border: 2px solid var(--r-ink);
+    border-radius: 0;
+    font-weight: 700;
+    letter-spacing: 0.4px;
+  }
